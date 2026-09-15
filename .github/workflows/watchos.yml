@@ -74,6 +74,13 @@ jobs:
           test -n "$app" || { echo "AmpWatch.app not found"; exit 1; }
           Scripts/capture-screens.sh "${{ steps.sim.outputs.udid }}" "$app" .artifacts/screens
 
+      - name: Export screenshots taken during UI tests
+        if: always() && steps.sim.outputs.udid != ''
+        run: |
+          xcrun xcresulttool export attachments \
+            --path .build/AmpWatch.xcresult \
+            --output-path .artifacts/screens/ui-tests
+
       - name: Upload the test result bundle
         # Only when something failed: it holds the assertion messages and the
         # element tree xcbeautify trims from the log.

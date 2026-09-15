@@ -27,6 +27,13 @@ final class AmpWatchUITests: XCTestCase {
         XCTFail("Could not reveal \(element)")
     }
 
+    private func capture(_ app: XCUIApplication, name: String) {
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = name
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     func testPuckEntryExplainsTheLimitWithoutOfferingFakeChat() {
         let app = launch(screen: "threads")
         let puck = app.descendants(matching: .any)["puck-button"]
@@ -37,6 +44,8 @@ final class AmpWatchUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["puck-unavailable"].exists)
         XCTAssertFalse(app.buttons["send-button"].exists)
         XCTAssertFalse(app.textFields.firstMatch.exists)
+        app.descendants(matching: .any)["puck"].swipeUp()
+        capture(app, name: "puck-guidance")
     }
 
     func testGroupedOverviewShowsCountsTitlesAndMissingRepository() {
@@ -49,12 +58,12 @@ final class AmpWatchUITests: XCTestCase {
         let chinese = rows.containing(NSPredicate(format: "label CONTAINS %@", "多语言与语音功能")).firstMatch
         reveal(chinese)
         XCTAssertTrue(chinese.label.contains("Updated 1m"))
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "grouped-chinese-title"
-        screenshot.lifetime = .keepAlways
-        add(screenshot)
+        XCUIDevice.shared.rotateDigitalCrown(delta: 0.16)
+        capture(app, name: "grouped-chinese-title")
         reveal(groups.containing(NSPredicate(format: "label CONTAINS %@", "Repository unavailable")).firstMatch)
+        capture(app, name: "grouped-missing-repository")
         reveal(app.staticTexts["threads-more-note"])
+        capture(app, name: "grouped-page-limit")
     }
 
     func testThreadListShowsFirstAndLastFixtureThread() {
@@ -82,6 +91,7 @@ final class AmpWatchUITests: XCTestCase {
         let app = launch(screen: "threads-error")
         XCTAssertTrue(app.descendants(matching: .any)["error-state"].waitForExistence(timeout: 20))
         reveal(app.buttons["Retry"])
+        capture(app, name: "threads-error-retry")
     }
 
     func testSendIsDisabledUntilThePromptHasContent() {
