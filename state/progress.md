@@ -9,7 +9,7 @@
 | M4 approvals | done | run 34942528647 green; approval / approval-destructive / approval-deferred inspected; bridge round trip (approve, reject, timeout) verified in this orb |
 | M5 offline | done | run 34945306951: all screens rendered, 20/21 UI tests; the settings scroll test was fixed in 12992af and re-verified with M6 |
 | M6 polish | done | run 34951796024 green, all 22 UI tests; montages in .amp/in/artifacts/ci-m6 |
-| Final review | in progress | AmpKit 103 green, plugin 51 green; CI run pending |
+| Final review | done | run 34955703876 green, 23/23 UI tests; approval-expired inspected; montage in .amp/in/artifacts/ci-review |
 
 ## Log
 
@@ -25,3 +25,4 @@
 - 2026-09-15 Thread B: tool.call handler held 2/5/10/20 min, all fine; no ceiling. Timeout raised to 10 min both sides. M5 pushed (c241b49).
 - 2026-09-15 M5 run 34945306951: over-cap badge on its own line confirmed. M6 pushed (d26cf8f): widgets target, glance file, always-on accent, VoiceOver.
 - 2026-09-15 M6 done (run 34951796024, 22/22 UI tests). Final adversarial review (oracle, 16 findings) fixed in one batch: outbox reentrancy/livelock, retryable errors not counted, approvals expire by bridge clock, banner approve only when whole command fits, commandID dedupe, APNs byte-clipping, announce failure rejects the call.
+- 2026-09-15 Run 34954523156 failed to compile (`.watchDefault()` on an `any HTTPTransport` parameter); fixed in 7f330a8. Run 34955703876 green: 23 UI tests, approval-expired renders header/copy/no buttons. Mission complete.
