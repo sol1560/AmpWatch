@@ -73,7 +73,8 @@ enum ScreenshotScene: String, CaseIterable {
         }
     }
 
-    @ViewBuilder
+    // Views are main-actor isolated under Swift 6, so building them is too.
+    @MainActor @ViewBuilder
     var view: some View {
         let thread = Fixtures.threads()[0]
         switch self {

@@ -19,24 +19,24 @@ final class AmpWatchUITests: XCTestCase {
 
     func testThreadListShowsOneRowPerFixtureThread() {
         let app = launch(screen: "threads")
-        XCTAssertTrue(app.otherElements["thread-list"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.descendants(matching: .any)["thread-list"].waitForExistence(timeout: 20))
         XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "thread-row").count, 4)
     }
 
     func testEmptyStateIsReachableAndNotJustAnEmptyList() {
         let app = launch(screen: "threads-empty")
-        XCTAssertTrue(app.otherElements["empty-state"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.descendants(matching: .any)["empty-state"].waitForExistence(timeout: 20))
     }
 
     func testUnauthorizedRendersAnActionableErrorRatherThanABlankScreen() {
         let app = launch(screen: "threads-error")
-        XCTAssertTrue(app.otherElements["error-state"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.descendants(matching: .any)["error-state"].waitForExistence(timeout: 20))
         XCTAssertTrue(app.buttons["Retry"].exists)
     }
 
     func testSendIsDisabledUntilThePromptHasContent() {
         let app = launch(screen: "compose")
-        XCTAssertTrue(app.otherElements["compose"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.descendants(matching: .any)["compose"].waitForExistence(timeout: 20))
         // A send button that is tappable while empty would fire a no-op webhook
         // request and burn rate-limit capacity.
         XCTAssertFalse(app.buttons["send-button"].isEnabled)
@@ -44,7 +44,7 @@ final class AmpWatchUITests: XCTestCase {
 
     func testUsageShowsATotal() {
         let app = launch(screen: "usage")
-        XCTAssertTrue(app.otherElements["usage"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.descendants(matching: .any)["usage"].waitForExistence(timeout: 20))
         XCTAssertTrue(app.staticTexts["total-cost"].exists)
     }
 }
