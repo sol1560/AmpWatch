@@ -2,200 +2,179 @@
 
 ## Thesis
 
-You have a laptop and your iPhone is one room away. So the watch is not a
-replacement for either — it is a **discreet control surface** for agents that
-are already running, usable during the hours when picking up the laptop or the
-phone is not an option.
-
-That makes the design goal *control*, not *awareness*:
+The watch is a **discreet control surface** for agents that are already
+running in Amp orbs, usable during the hours when the laptop and the phone are
+off-limits. The goal is *control*, not *awareness*:
 
 > Keep me in the loop with my agents, and let me unblock them, from my wrist.
 
-The previous draft assumed the watch was alone and had to be a read-mostly
-glance device. It is not alone. The phone next door changes the architecture.
+## Everything runs in the cloud; no laptop, no phone
 
-## The phone is the broker
+Two facts settle the architecture:
 
-Apple's documentation settles this: calling `sendMessage` from a watch app
-**wakes the counterpart iOS app in the background** and makes it reachable. The
-watch and the iPhone also stay connected over Wi-Fi when Bluetooth is out of
-range.
+1. `amp.createWebhook` **only works inside a plugin running in an Amp-managed
+   orb**. It is not available to local CLI plugins. So the bridge that turns
+   watch taps into agent actions must live in an orb, not on the laptop.
+2. The school Wi-Fi is WPA (password), not captive. The watch can join it on
+   its own. There is no need for the iPhone to relay anything.
 
-So the iPhone — sitting untouched next door — becomes the piece of
-infrastructure this app needed and I previously proposed building on
-Cloudflare:
+So there is exactly one piece of infrastructure, and Amp already hosts it: a
+**hub thread** in this project whose plugin does the bridging.
 
 ```diagram
-┌───────────────┐
-│ Apple Watch   │  UI only. No credentials. No API knowledge.
-└───────┬───────┘
-        │ WCSession sendMessage  (wakes the phone app in the background)
-        ▼
-┌───────────────┐
-│ iPhone        │  The broker. Never touched.
-│  · Keychain   │  · holds the workspace credential
-│  · API calls  │  · does every read
-│  · webhook    │  · does every write
-│  · local notif│  · alerts mirror to the watch automatically
-└───────┬───────┘
-        │ HTTPS
-        ▼
-┌──────────────────────────────┐
-│ ampcode.com  +  orb plugin   │
-└──────────────────────────────┘
+┌─────────────┐  HTTPS (read)   ┌──────────────────────────────┐
+│ Apple Watch │───────────────▶ │ ampcode.com External API v2   │
+│  on Wi-Fi   │                 │  threads · messages · usage   │
+│             │  POST (write)   └──────────────────────────────┘
+│             │───────────────▶ ┌──────────────────────────────┐
+│             │                 │ webhook → hub-thread plugin   │
+│             │ ◀────────────── │  amp.threads.get(id)          │
+└─────────────┘  APNs (alerts)  │   .state / .appendUserMessage │
+                                │   .cancel / createThread      │
+                                │  keepAlive() while in session │
+                                └──────────────┬───────────────┘
+                                               │ controls
+                                               ▼
+                                ┌──────────────────────────────┐
+                                │ your other orb threads        │
+                                │ (opened from ampcode.com)     │
+                                └──────────────────────────────┘
 ```
 
-Three problems disappear at once:
+Scope consequence, stated plainly: **AmpWatch controls threads that run in
+orbs.** Threads driven by a local CLI on the laptop are out of reach of a
+cloud plugin. For a student working from the web UI that is the whole
+population.
 
-1. **Credentials leave the watch.** The workspace-scoped M2M secret lives in the
-   iPhone Keychain, which is the right place for it. No Cloudflare Worker, no
-   custom broker, no token-narrowing scheme — for v1.
-2. **Alerts need no push server.** An iOS local notification is mirrored to the
-   watch by the system when the watch is on your wrist and the phone is locked.
-   That is exactly the state your phone is in. Free alert channel.
-3. **The watch stops needing its own internet.** Bluetooth or same-network
-   Wi-Fi to the phone is enough, and the phone carries the connection.
+## What each leg does
 
-### Degraded modes, in order
+**Reads — External API v2, directly from the watch.** `GET /threads`,
+`GET /threads/{id}/messages`, `GET /threads/{id}/usage` with a bearer token
+from a workspace M2M application. The token lives in the watch Keychain. This
+is read-only by construction; the API has no write endpoints for threads, so a
+leaked token cannot make an agent do anything.
 
-| Situation | Behaviour |
+**Writes — one webhook, owned by the hub plugin.** Every command is a small
+signed JSON POST: `prompt`, `steer`, `cancel`, `create`, `approve`, `reject`,
+`defer`. The handler returns nothing (the API is `void`), so the watch never
+waits on it for data; it learns the outcome from the next read or the next
+push. Rate limit is a burst of 10 and 10/min refill, plenty for a wrist.
+
+**State and alerts — APNs, sent by the plugin.** The External API exposes no
+run state. The plugin does: `thread.state` is
+`idle | running | awaiting-approval | error`. The hub subscribes to the
+threads it knows about and pushes on every transition. Pushes carry the state
+and, for approvals, the tool name and input (APNs payload limit is 4 KB, so
+long inputs are truncated *with a flag*, never silently). Sending APNs needs
+HTTP/2; rather than rely on the plugin runtime's `fetch`, the plugin shells
+out with `amp.$` to the orb's `curl --http2`, which is known to work.
+
+## The plugin API, verified from the type definitions
+
+| Need | API |
 | --- | --- |
-| Phone reachable (normal) | Everything through the phone |
-| Phone out of range | Watch falls back to direct HTTPS with a narrow token; read + prompt only, no approvals |
-| School Wi-Fi is captive and the watch cannot join | Watch still reaches the phone over Bluetooth; degraded but working |
-| Neither | Offline queue: compose now, send when a link returns |
-
-The watch must show which mode it is in. Silently degrading from "approvals
-work" to "approvals do not work" is the kind of lie this app must not tell.
-
-## What the plugin API actually allows
-
-I read the real type definitions in an orb, and my earlier design badly
-underestimated them. The External API is read-only and exposes no run state,
-but a **plugin does**:
-
-| Capability | API |
-| --- | --- |
-| Real agent state | `thread.state: Observable<'idle' \| 'running' \| 'awaiting-approval' \| 'error'>` |
-| **Approve / reject / modify tool calls** | `tool.call` handler returns `allow`, `reject-and-continue`, `modify`, or `synthesize` |
+| Real agent state | `amp.threads.get(id).state` — `Observable<ThreadState>` with `get()` |
+| Approve / reject / modify a tool call | `tool.call` handler returns `allow`, `reject-and-continue`, `modify`, `synthesize` |
 | Stop a runaway turn | `thread.cancel()` |
-| Start new work | `Agent.createThread`, `getBuiltinAgent(mode)` |
-| Receive commands from outside | `amp.createWebhook(...)`, 30 s handler deadline |
+| Start new work | `agent.createThread(...)`, `amp.getBuiltinAgent(mode)` |
 | Steer a busy thread | `appendUserMessage(msg, { steer: true })` |
+| Receive commands | `amp.createWebhook({ key, handler })`, 30 s deadline, at-least-once |
+| Stay awake | `amp.executor.keepAlive()` — renews a lease, costs orb credits |
+| Send pushes | `amp.$\`curl --http2 ...\`` |
 
-`awaiting-approval` is the important one. **Approving a tool call from your
-wrist is the feature that makes this worth building**, and it is the thing that
-most often blocks an agent while you are away from the keyboard.
+Checked in at `.amp/plugins/`, the bridge loads in every orb thread of the
+project. Only the hub thread turns on `keepAlive()` and the webhook; the other
+threads' plugin instances handle their own `tool.call` events.
 
-Checked in at `.amp/plugins/`, the bridge loads automatically in every orb
-thread for that project — no per-thread setup.
+## Approvals: the flow and the two things not yet measured
 
-### The one hard constraint
-
-Webhook handlers get **30 seconds**, then they are aborted and retried. So the
-webhook cannot block waiting for you to approve something. The flow inverts:
+Webhook handlers get 30 s, so they cannot block waiting for a human. The
+`tool.call` handler is what blocks; the webhook only resolves it.
 
 ```diagram
-tool.call fires
-   └─▶ plugin reports "awaiting approval" upstream, then awaits a promise
-                                   │
-   watch shows it ◀────────────────┘
-        │
-   you tap Approve
-        │
-        └─▶ phone POSTs the webhook (returns in milliseconds)
-                 └─▶ handler resolves the pending promise
-                          └─▶ tool.call returns { action: 'allow' }
+thread X: tool.call fires
+   └─▶ plugin pushes "awaiting approval" (tool + input) to the watch
+   └─▶ handler awaits a decision
+                                        watch shows it, you tap Approve
+                                             └─▶ POST webhook { approve, callID }
+   decision reaches thread X's handler ◀─────────┘
+   └─▶ returns { action: 'allow' }
 ```
 
-**Unknown:** how long a `tool.call` handler may stay pending before Amp gives
-up. Not documented. This is the single biggest technical risk in the plan and
-gets measured first in M3. If the ceiling is short, approvals degrade to
-"approve the next tool call of this kind", decided in advance.
+**Unknown 1 — webhook ownership.** The docs say project threads owned by the
+same user *share* one registration per key, and the handler context names "the
+thread that owns this webhook registration". If deliveries always land in the
+hub's handler, the hub cannot resolve a promise living in thread X's plugin
+process. The fallback is a tiny decision store the per-thread handlers poll
+(one Supabase table would do; the watch writes, the handler reads). Measured
+first in M3 because it decides whether a second component exists at all.
+
+**Unknown 2 — how long a `tool.call` handler may stay pending.** Not
+documented. If the ceiling is short, the handler returns `reject-and-continue`
+with a stated reason at the deadline and the watch offers "retry with approval
+pre-granted for this exact call".
+
+**Unknown 3 — does a webhook delivery resume a paused orb?** If yes, the hub
+needs no `keepAlive()` and costs nothing between commands. If no, the hub holds
+the lease during school hours and releases it after. Cheap to test in M3.
 
 ## Features, by whether they keep you in control
 
 **Tier 1 — without these, "control" is a lie**
 
-- Thread list with **real** state, including a count of threads blocked on you
+- Thread list with **real** state, blocked-on-you threads first
 - Read the transcript, newest first
 - Send a prompt / steer a running thread
-- **Approve, reject, or modify a pending tool call**
+- **Approve, reject, or defer a pending tool call**
 - Cancel the current turn
 
 **Tier 2 — the difference between coping and working**
 
 - Start a thread from a saved template (repo + agent mode + opening prompt)
-- Switch agent mode on a thread
 - Budget guard: warn, then auto-cancel, past a per-thread dollar cap
-- **Offline draft queue** — compose while disconnected, deliver in order, once,
-  when a link returns
+- **Offline outbox** — compose while disconnected, deliver in order, once,
+  when Wi-Fi returns; decisions expire so a stale approval cannot fire later
+- Notification actions (`Approve` / `Reject` / `Continue`) that act without
+  opening the app
 
 **Tier 3 — ambient**
 
-- Complication variants: threads running · **threads awaiting you** · today's spend
-- Crown-scrollable overview of everything at once
+- Complications: threads running · **threads awaiting you** · today's spend
 - Handoff to the laptop via `NSUserActivity`
 
 ### Input
 
-Dictation needs network, so it cannot be the only method. In order of expected
-use: **saved phrases** synced from the phone (the real speed win), Scribble,
-the watch keyboard, then dictation.
+Dictation needs network and is conspicuous. In order of expected use: **saved
+phrases**, Scribble, the watch keyboard, then dictation.
 
 ## The approval screen is a security surface
-
-The watch can now approve shell commands. Judging a command you cannot fully
-read is worse than not having the feature.
 
 - Monospace, scrollable, **never truncated without saying so**
 - Destructive patterns (`rm -rf`, force push, `DROP TABLE`, credential paths)
   flagged before you can approve
 - When the input does not fit, the default action is **Defer**, not Approve
 - No auto-approval, ever. No "approve all".
-- Approvals require the phone link. In fallback mode the button is absent, not
-  disabled-looking-clickable.
-
-## Alerts
-
-**v1 — no server.** The phone polls in the background and posts a local
-notification, which the system mirrors to your watch. Latency is minutes; iOS
-background refresh is opportunistic. Good enough for "it finished", too slow
-for "it is blocked on you".
-
-**v2 — direct APNs from the plugin.** You have a paid developer account, so
-APNs is available. The plugin in the orb can hold an APNs `.p8` key and POST a
-push itself the moment `state` becomes `awaiting-approval`, with no separate
-server anywhere. *To verify:* APNs requires HTTP/2, and whether the plugin
-runtime's `fetch` speaks HTTP/2 is unconfirmed. If not, a ~50-line Worker
-relays it.
-
-Notification actions (`Approve`, `Reject`, `Continue`) act without opening the
-app — the shortest possible loop and the expected common case.
+- If the last push is older than the decision TTL, the button is absent, not
+  disabled-looking-clickable — the watch may be looking at a stale request
 
 ## Architecture
 
 ```diagram
-        ┌────────────────┐        ┌──────────────────────────┐
-        │ Watch app      │        │ iPhone app               │
-        │  SwiftUI views │◀──WC──▶│  broker + Keychain       │
-        │  offline queue │        │  poller + notifications  │
-        └───────┬────────┘        └─────────┬────────────────┘
-                │                           │
-                └────── AmpKit ─────────────┘
-                   shared, platform-neutral:
-                   models · client · state machine · formatting
-                        │
-        ┌───────────────┴───────────────┐
-        ▼                               ▼
-  External API (read)            bridge plugin in orb
-                                 state · approvals · cancel · create
+        ┌──────────────────────┐
+        │ Watch app (SwiftUI)  │  thin views · Keychain · outbox · APNs receiver
+        └──────────┬───────────┘
+                   │
+                AmpKit   shared, platform-neutral, tested on Linux:
+                   │     models · API client · approval rules · outbox · ranking
+        ┌──────────┴───────────┐
+        ▼                      ▼
+  External API v2        .amp/plugins/amp-watch-bridge.ts
+  (reads)                webhook · state fan-out · APNs · tool.call
 ```
 
-`AmpKit` stays the centre of gravity: it builds and tests on Linux, so the
-interesting logic — the approval state machine, the offline queue's
-exactly-once delivery, ranking, formatting — is verified in an orb without a
-Mac or a simulator. Views stay thin on purpose.
+`AmpKit` builds and tests on Linux, so the logic that can lie — approval
+rules, exactly-once outbox, ranking — is verified in an orb without a Mac.
+Views stay thin on purpose.
 
 ## Milestones
 
@@ -204,14 +183,15 @@ Each ends with CI screenshots as its reviewable artifact.
 | # | Scope | Done when |
 | --- | --- | --- |
 | **M0** ✅ | Fixture UI, CI builds + screenshots on a watchOS simulator | Done |
-| **M1** | **Connectivity truth** | In your actual classroom: does the watch reach the phone next door, over what, and how fast. Everything downstream assumes this |
-| **M2** | Phone broker + real reads | Watch shows your real threads, with credentials only on the phone |
-| **M3** | Bridge plugin + **approvals** | Approve a real tool call from the watch; the pending-handler ceiling is **measured** and documented; timeout auto-rejects with a stated reason |
-| **M4** | Tier 2 + offline queue | Three prompts written in airplane mode arrive in order, exactly once |
-| **M5** | Alerts | Local-notification path working; APNs-from-plugin spike resolved either way |
-| **M6** | Battery + polish | Measured drain across a real school day; VoiceOver; always-on rendering |
+| **M1** | Real reads | Watch shows your real threads and messages over school Wi-Fi with a read-only token |
+| **M2** | Hub plugin + writes | `prompt`, `cancel`, `create` from the watch reach a real orb thread via the webhook |
+| **M3** | **Approvals** | Approve a real tool call from the watch; unknowns 1–3 above measured and written down |
+| **M4** | Pushes | `awaiting-approval` arrives on the wrist within seconds via APNs from the plugin; notification actions work |
+| **M5** | Outbox + templates + budget guard | Three prompts written in airplane mode arrive in order, exactly once |
+| **M6** | Battery + polish | Measured drain across a real school day; complications; VoiceOver |
 
-M1 is first because it is the only one that can invalidate the rest.
+M1 is first because it is the smallest thing that proves the watch, the Wi-Fi
+and the token work together, and it needs no plugin.
 
 ## What "correct" means
 
@@ -219,26 +199,23 @@ The dangerous bugs here are **lies**, not crashes:
 
 - An approval that says it went through when the handler had already timed out
 - A queued prompt delivered twice after a reconnect
-- The approval button visible while the phone link is down
+- An approve button shown for a request that is no longer pending
 - A truncated command presented as if it were complete
 - A stale `idle` shown while the thread is actually blocked on you
 
 Each gets a test in `AmpKit`, where it runs without a simulator.
 
-## Open questions for you
+## Open questions
 
-1. **Watch model?** Series 5 and SE are 2.4 GHz only, which matters for school
-   Wi-Fi. Cellular would remove the dependence on the phone entirely.
-2. **School Wi-Fi: does it have a login page?** Apple Watch cannot join captive
-   networks at all. If it does, the watch reaches the phone by Bluetooth only —
-   which is likely fine at one room's distance, but changes M1's result. Your
-   laptop's hotspot is a good fallback since it is not captive.
-3. **Why the watch and not the laptop you always have?** I am assuming
-   discretion — that a wrist glance is acceptable in a room where a laptop is
-   not. If the real reason is different, the whole priority order changes.
+1. **Watch model?** Series 5 / SE are 2.4 GHz only; cellular would work even
+   off the school network.
+2. **Hub cost tolerance.** If unknown 3 says webhooks do not wake a paused
+   orb, `keepAlive()` burns credits for the whole school day. Acceptable?
 
 ## Non-goals
 
 - Reading or writing code, viewing diffs. The laptop is always with you.
-- Browsing history or search. That is the phone's job.
-- Holding workspace-wide credentials on the watch in normal operation.
+- Controlling local-CLI threads on the laptop. Cloud plugin cannot reach them.
+- Holding a write-capable workspace credential on the watch. Writes go through
+  the webhook, whose URL is the only secret with power, and it is scoped to
+  the commands the plugin chooses to accept.
