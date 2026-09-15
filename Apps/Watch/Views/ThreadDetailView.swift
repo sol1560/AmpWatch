@@ -8,8 +8,32 @@ final class ThreadDetailModel {
         case idle, confirming, sending, sent, failed(String)
     }
 
+    enum ArmStatus: Equatable {
+        case idle, sending, failed(String)
+    }
+
     private(set) var state: Loadable<[ThreadMessage]> = .loading
     var cancelStatus: CancelStatus = .idle
+    /// What the watch last asked for. The bridge keeps the real value in
+    /// memory and forgets it when its orb restarts, so this is a request, not
+    /// a mirror; it starts at the bridge's own default.
+    var armLevel: ArmLevel = .off
+    var armStatus: ArmStatus = .idle
+
+    func arm(_ level: ArmLevel, threadID: String, using environment: AmpEnvironment) async {
+        guard let sink = environment.promptSink else {
+            armStatus = .failed("No bridge configured")
+            return
+        }
+        armStatus = .sending
+        do {
+            try await sink.send(.arm(threadID: threadID, level: level), idempotencyKey: nil)
+            armStatus = .idle
+        } catch {
+            let amp = error as? AmpError ?? .transport(String(describing: error))
+            armStatus = .failed(amp.watchDescription)
+        }
+    }
 
     func cancel(threadID: String, using environment: AmpEnvironment) async {
         guard let sink = environment.promptSink else {
@@ -99,6 +123,8 @@ struct ThreadDetailView: View {
                     Label("Cost", systemImage: "dollarsign.circle")
                 }
                 .tint(AmpTheme.parchmentDim)
+
+                armControl
             }
             .padding(.bottom, 8)
         }
@@ -136,6 +162,33 @@ struct ThreadDetailView: View {
                 .font(AmpTheme.body(11))
                 .foregroundStyle(AmpTheme.parchment)
         case let .failed(message):
+            Text(message)
+                .font(AmpTheme.body(11))
+                .foregroundStyle(AmpTheme.ember)
+        }
+    }
+
+    /// Which of this thread's commands should stop and ask the watch. Sent
+    /// on every change; the bridge answers with pushes, not with a reply.
+    @ViewBuilder
+    private var armControl: some View {
+        Picker(selection: $model.armLevel) {
+            ForEach(ArmLevel.allCases, id: \.self) { level in
+                Text(level.label).tag(level)
+            }
+        } label: {
+            Label("Ask me first", systemImage: "hand.raised")
+        }
+        .pickerStyle(.navigationLink)
+        .font(AmpTheme.body(13))
+        .tint(AmpTheme.parchmentDim)
+        .disabled(model.armStatus == .sending)
+        .onChange(of: model.armLevel) { _, level in
+            Task { await model.arm(level, threadID: thread.id, using: amp) }
+        }
+        .accessibilityIdentifier("arm-picker")
+
+        if case let .failed(message) = model.armStatus {
             Text(message)
                 .font(AmpTheme.body(11))
                 .foregroundStyle(AmpTheme.ember)

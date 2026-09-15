@@ -80,6 +80,36 @@ public enum Fixtures {
         .webhookURL: "https://hooks.example.test/w/fixture",
     ]
 
+    /// Held calls for the approval screenshots: one to decide, one to warn
+    /// about, one the watch must refuse to decide.
+    public static func approvals(now: Date = referenceDate) -> [PendingApproval] {
+        let threadID = threads(now: now)[0].id
+        return [
+            PendingApproval(
+                id: "TU-01fixtureplain",
+                threadID: threadID,
+                toolName: "shell_command",
+                input: "/repo/Packages/AmpKit $ swift test --filter ThreadActivityTests",
+                requestedAt: now.addingTimeInterval(-40)
+            ),
+            PendingApproval(
+                id: "TU-02fixtureforce",
+                threadID: threadID,
+                toolName: "shell_command",
+                input: "/repo $ git push --force origin main",
+                requestedAt: now.addingTimeInterval(-95)
+            ),
+            PendingApproval(
+                id: "TU-03fixturelong",
+                threadID: threadID,
+                toolName: "shell_command",
+                input: "/repo $ python3 - <<'EOF'\nimport json, pathlib\nfor path in pathlib.Path('Sources').rglob('*.swift'):\n    text = path.read_text()\n    if 'Date()' in text:\n        print(path)\n",
+                requestedAt: now.addingTimeInterval(-8),
+                inputIsComplete: false
+            ),
+        ]
+    }
+
     public static func usage() -> ThreadUsage {
         ThreadUsage(
             threadID: "T-01a0a325-7a11-73eb-a5a7-46c40b37076d",

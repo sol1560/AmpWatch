@@ -101,4 +101,44 @@ final class AmpWatchUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["thread-detail"].waitForExistence(timeout: 20))
         XCTAssertEqual(app.staticTexts["thread-title"].label, "Fix the flaky watchOS simulator boot in CI")
     }
+
+    func testDetailOffersTheAskMeFirstPicker() {
+        let app = launch(screen: "detail")
+        XCTAssertTrue(app.descendants(matching: .any)["thread-detail"].waitForExistence(timeout: 20))
+        let list = app.descendants(matching: .any)["thread-detail"]
+        list.swipeUp()
+        list.swipeUp()
+        XCTAssertTrue(app.descendants(matching: .any)["arm-picker"].waitForExistence(timeout: 5))
+    }
+
+    func testPlainApprovalOffersApproveAndReject() {
+        let app = launch(screen: "approval")
+        XCTAssertTrue(app.descendants(matching: .any)["approval"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["approval-command"].label.contains("swift test"))
+        XCTAssertTrue(app.buttons["approve-button"].isEnabled)
+        XCTAssertTrue(app.buttons["reject-button"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["approval-warning"].exists)
+    }
+
+    func testDestructiveApprovalWarnsBeforeTheCommand() {
+        let app = launch(screen: "approval-destructive")
+        XCTAssertTrue(app.descendants(matching: .any)["approval"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.descendants(matching: .any)["approval-warning"].exists)
+        let warning = app.staticTexts["force push"]
+        XCTAssertTrue(warning.exists)
+        // Approve is still offered, but sits below the command and the warning.
+        let approve = app.buttons["approve-button"]
+        XCTAssertTrue(approve.exists)
+        XCTAssertLessThan(warning.frame.minY, approve.frame.minY)
+    }
+
+    func testTruncatedApprovalHasNoApproveButton() {
+        let app = launch(screen: "approval-deferred")
+        XCTAssertTrue(app.descendants(matching: .any)["approval"].waitForExistence(timeout: 20))
+        // Approving what cannot be read is the failure this screen prevents:
+        // the button must not exist, not merely be disabled.
+        XCTAssertFalse(app.buttons["approve-button"].exists)
+        XCTAssertTrue(app.buttons["defer-button"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["approval-defer-reason"].exists)
+    }
 }

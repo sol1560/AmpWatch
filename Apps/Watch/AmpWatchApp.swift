@@ -30,6 +30,7 @@ struct RootView: View {
     @State private var session: AmpSession
     /// Bumped on every reload so a new sink re-registers the device token.
     @State private var generation = 0
+    @State private var path = NavigationPath()
 
     init(secrets: any SecretStore, push: PushRegistrar? = nil) {
         self.secrets = secrets
@@ -38,18 +39,28 @@ struct RootView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            switch session {
-            case .needsSetup:
-                SetupView()
-            case .ready:
-                ThreadListView()
+        NavigationStack(path: $path) {
+            Group {
+                switch session {
+                case .needsSetup:
+                    SetupView()
+                case .ready:
+                    ThreadListView()
+                }
             }
+            .navigationDestination(for: PendingApproval.self) { ApprovalView(approval: $0) }
         }
         .environment(\.amp, environment)
         .tint(AmpTheme.ember)
         .task(id: "\(push?.deviceToken ?? "")|\(generation)") { await registerForPushes() }
         .task(id: push?.pendingCommand) { await sendPendingCommand() }
+        .task(id: push?.pendingApproval) { openPendingApproval() }
+    }
+
+    private func openPendingApproval() {
+        guard let push, let approval = push.pendingApproval, case .ready = session else { return }
+        push.pendingApproval = nil
+        path.append(approval)
     }
 
     private func registerForPushes() async {
@@ -105,6 +116,9 @@ enum ScreenshotScene: String, CaseIterable {
     case setup
     case settings
     case newThread = "new-thread"
+    case approval
+    case approvalDestructive = "approval-destructive"
+    case approvalDeferred = "approval-deferred"
 
     static let launchArgument = "-ampwatch-screen"
 
@@ -144,6 +158,12 @@ enum ScreenshotScene: String, CaseIterable {
             NavigationStack { SettingsView() }.tint(AmpTheme.ember)
         case .newThread:
             NavigationStack { NewThreadView() }.tint(AmpTheme.ember)
+        case .approval:
+            NavigationStack { ApprovalView(approval: Fixtures.approvals()[0]) }.tint(AmpTheme.ember)
+        case .approvalDestructive:
+            NavigationStack { ApprovalView(approval: Fixtures.approvals()[1]) }.tint(AmpTheme.ember)
+        case .approvalDeferred:
+            NavigationStack { ApprovalView(approval: Fixtures.approvals()[2]) }.tint(AmpTheme.ember)
         }
     }
 }

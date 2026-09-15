@@ -13,6 +13,8 @@
  *   { "type": "cancel", "threadID": "T-…" }
  *   { "type": "create", "prompt": "…", "mode"?: "low"|"medium"|"high"|"ultra" }
  *   { "type": "register", "deviceToken": "<64 hex>", "environment"?: "sandbox"|"production" }
+ *   { "type": "arm", "threadID": "T-…", "level": "off"|"risky"|"all" }
+ *   { "type": "decide", "threadID": "T-…", "approvalID": "toolu_…", "decision": "approve"|"reject"|"defer" }
  *
  * and every instance POSTs its own thread's turn outcomes to the same URL:
  *
@@ -21,6 +23,14 @@
  * The receiving instance turns announcements into APNs pushes for every
  * registered watch (`apns.ts`). Registrations live in that instance's memory;
  * the watch re-registers on every launch, which is what keeps this simple.
+ *
+ * Approvals need the *thread's own* instance, because only it sits in that
+ * thread's `tool.call` handler. Each instance therefore also registers a
+ * per-thread key (`approve-<threadID>`) and tells the shared receiver its URL
+ * with a `link` command at the start of every turn; the receiver forwards
+ * `arm` and `decide` there. Threads are unarmed by default: the bridge holds
+ * nothing until the watch arms that thread. See `approvals.ts` for what is
+ * held at each level.
  *
  * The *hub* — the one orb with a `.amp/ampwatch-hub` marker file, gitignored —
  * additionally writes the capability URL to `.amp/ampwatch-hub.url` (mode 600)
@@ -45,22 +55,45 @@ import {
 	type ProviderToken,
 	type PushEvent,
 } from './apns'
+import { ApprovalQueue, needsWatchApproval, renderInput, type ArmLevel } from './approvals'
 import { parseCommand, SeenEvents, type AnnounceOutcome, type WatchCommand } from './commands'
 
 export const HUB_MARKER = '.amp/ampwatch-hub'
 export const HUB_URL_FILE = '.amp/ampwatch-hub.url'
 export const WEBHOOK_KEY = 'amp-watch'
 
+/**
+ * How long a held call waits for the watch. Amp's own ceiling for a
+ * `tool.call` handler is measured in `docs/DESIGN.md`; this stays under it so
+ * the outcome is always ours (a clear rejection) and never Amp's.
+ */
+export const APPROVAL_TIMEOUT_MS = 4 * 60 * 1000
+
 /** Where pushes go. Keyed by device token, so a re-register is idempotent. */
 type Registrations = Map<string, { environment: 'sandbox' | 'production' }>
+
+/** What the shared receiver knows: who to push, and where each thread takes decisions. */
+interface Receiver {
+	registrations: Registrations
+	approvalLinks: Map<string, string>
+	pusher: Pusher
+}
+
+/** What this instance knows about the threads it sits in. */
+interface Guard {
+	levels: Map<string, ArmLevel>
+	queue: ApprovalQueue
+	/** Per-thread webhook URLs, created on first use. */
+	links: Map<string, Promise<string>>
+}
 
 export default async function (amp: PluginAPI) {
 	const root = amp.system.workspaceRoot ? amp.helpers.filePathFromURI(amp.system.workspaceRoot) : null
 	const isHub = root !== null && existsSync(join(root, HUB_MARKER))
 
 	const seen = new SeenEvents()
-	const registrations: Registrations = new Map()
-	const pusher = new Pusher(amp)
+	const receiver: Receiver = { registrations: new Map(), approvalLinks: new Map(), pusher: new Pusher(amp) }
+	const guard: Guard = { levels: new Map(), queue: new ApprovalQueue(), links: new Map() }
 
 	const { url } = await amp.createWebhook({
 		key: WEBHOOK_KEY,
@@ -76,9 +109,102 @@ export default async function (amp: PluginAPI) {
 				ctx.logger.log(`amp-watch: discarding event ${event.id}: ${parsed.reason}`)
 				return
 			}
-			await apply(amp, parsed.command, registrations, pusher)
+			await apply(amp, parsed.command, receiver)
 			ctx.logger.log(`amp-watch: applied ${describe(parsed.command)}`)
 		},
+	})
+
+	/** The URL the shared receiver forwards this thread's `arm` and `decide` to. */
+	function approvalURL(threadID: string): Promise<string> {
+		let link = guard.links.get(threadID)
+		if (!link) {
+			link = amp
+				.createWebhook({
+					key: `approve-${threadID}`,
+					handler: async (event, ctx) => {
+						if (!seen.markSeen(event.id)) return
+						const parsed = parseCommand(event.body)
+						if (!parsed.ok || (parsed.command.type !== 'arm' && parsed.command.type !== 'decide')) {
+							ctx.logger.log(`amp-watch: approval webhook discarding event ${event.id}`)
+							return
+						}
+						const command = parsed.command
+						if (command.type === 'arm') {
+							guard.levels.set(command.threadID, command.level)
+							ctx.logger.log(`amp-watch: ${describe(command)}`)
+							return
+						}
+						const known = guard.queue.decide(command.approvalID, command.decision)
+						ctx.logger.log(`amp-watch: ${describe(command)}${known ? '' : ' (nothing waiting)'}`)
+					},
+				})
+				.then((registration) => registration.url)
+			guard.links.set(threadID, link)
+		}
+		return link
+	}
+
+	async function post(body: Record<string, unknown>): Promise<void> {
+		const response = await fetch(url, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify(body),
+		})
+		if (!response.ok) amp.logger.log(`amp-watch: ${String(body.type)} rejected with HTTP ${response.status}`)
+	}
+
+	// Tell the receiver where this thread takes decisions: now, and at every
+	// turn rather than once, because the receiving instance keeps links in
+	// memory and may have restarted.
+	async function link(threadID: string): Promise<void> {
+		await post({ type: 'link', threadID, approvalURL: await approvalURL(threadID) })
+	}
+	const linked = new Set<string>()
+	amp.activeThread.subscribe((thread) => {
+		if (!thread || linked.has(thread.id)) return
+		linked.add(thread.id)
+		void link(thread.id)
+	})
+	amp.on('agent.start', async (event) => {
+		await link(event.thread.id)
+		return {}
+	})
+
+	amp.on('tool.call', async (event) => {
+		const level = guard.levels.get(event.thread.id) ?? 'off'
+		if (!needsWatchApproval(level, event.tool, event.input)) return { action: 'allow' }
+
+		const rendered = renderInput(event.tool, event.input)
+		const request = {
+			id: event.toolUseID,
+			threadID: event.thread.id,
+			toolName: event.tool,
+			input: rendered.text,
+			inputIsComplete: rendered.complete,
+			requestedAt: Date.now(),
+		}
+		const decision = guard.queue.wait(request, APPROVAL_TIMEOUT_MS)
+		await post({
+			type: 'announce',
+			threadID: event.thread.id,
+			outcome: 'awaiting-approval',
+			title: await amp.threads.get(event.thread.id).title.get(),
+			summary: null,
+			approval: { id: request.id, toolName: request.toolName, input: request.input, inputIsComplete: request.inputIsComplete },
+		})
+		const outcome = await decision
+		amp.logger.log(`amp-watch: ${event.tool} ${request.id} ${outcome}`)
+		switch (outcome) {
+			case 'approve':
+				return { action: 'allow' }
+			case 'reject':
+				return { action: 'reject-and-continue', message: 'Rejected from the watch. Do not retry it; explain what you would have done and wait.' }
+			case 'timeout':
+				return {
+					action: 'reject-and-continue',
+					message: `Nobody approved this from the watch within ${APPROVAL_TIMEOUT_MS / 60000} minutes. Do not retry it; say what is blocked and wait.`,
+				}
+		}
 	})
 
 	if (isHub && root) {
@@ -92,25 +218,23 @@ export default async function (amp: PluginAPI) {
 	// straight to `pusher` because the registrations live with whichever
 	// instance Amp delivers to, and that may not be this one.
 	amp.on('agent.end', async (event) => {
+		// A cancelled turn takes its held calls with it.
+		for (const pending of guard.queue.pending()) {
+			if (pending.threadID === event.thread.id) guard.queue.cancel(pending.id)
+		}
 		const outcome: AnnounceOutcome = event.status
-		const title = await amp.threads.get(event.thread.id).title.get()
-		const announcement = {
+		await post({
 			type: 'announce',
 			threadID: event.thread.id,
 			outcome,
-			title,
+			title: await amp.threads.get(event.thread.id).title.get(),
 			summary: lastAssistantLine(event.messages),
-		}
-		const response = await fetch(url, {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify(announcement),
 		})
-		if (!response.ok) amp.logger.log(`amp-watch: announce rejected with HTTP ${response.status}`)
 	})
 }
 
-async function apply(amp: PluginAPI, command: WatchCommand, registrations: Registrations, pusher: Pusher): Promise<void> {
+async function apply(amp: PluginAPI, command: WatchCommand, receiver: Receiver): Promise<void> {
+	const { registrations, approvalLinks, pusher } = receiver
 	switch (command.type) {
 		case 'prompt':
 			await amp.threads
@@ -137,6 +261,24 @@ async function apply(amp: PluginAPI, command: WatchCommand, registrations: Regis
 			}
 			return
 		}
+		case 'link':
+			approvalLinks.set(command.threadID, command.approvalURL)
+			return
+		case 'arm':
+		case 'decide': {
+			const target = approvalLinks.get(command.threadID)
+			if (!target) {
+				amp.logger.log(`amp-watch: no approval link for ${command.threadID}; has it started a turn since the receiver restarted?`)
+				return
+			}
+			const response = await fetch(target, {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify(command),
+			})
+			if (!response.ok) amp.logger.log(`amp-watch: forwarding ${command.type} failed with HTTP ${response.status}`)
+			return
+		}
 	}
 }
 
@@ -150,8 +292,17 @@ function pushEvent(command: Extract<WatchCommand, { type: 'announce' }>): PushEv
 			// The watch (or the user at a keyboard) asked for this; nothing to say.
 			return null
 		case 'awaiting-approval':
-			// Approvals carry their own push from the tool.call handler (M4).
-			return null
+			if (!command.approval) return null
+			return {
+				kind: 'approval',
+				threadID: command.threadID,
+				title: command.title,
+				approvalID: command.approval.id,
+				toolName: command.approval.toolName,
+				summary: command.approval.input,
+				inputIsComplete: command.approval.inputIsComplete,
+				requestedAt: Date.now(),
+			}
 	}
 }
 
@@ -262,6 +413,12 @@ function describe(command: WatchCommand): string {
 		case 'register':
 			return `register watch (${command.environment})`
 		case 'announce':
-			return `announce ${command.outcome} ← ${command.threadID}`
+			return `announce ${command.outcome}${command.approval ? ` ${command.approval.id}` : ''} ← ${command.threadID}`
+		case 'link':
+			return `link ← ${command.threadID}`
+		case 'arm':
+			return `arm ${command.level} → ${command.threadID}`
+		case 'decide':
+			return `decide ${command.decision} ${command.approvalID} → ${command.threadID}`
 	}
 }

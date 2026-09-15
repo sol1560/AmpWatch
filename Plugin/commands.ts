@@ -4,6 +4,7 @@
  * Pure: no Amp API, no I/O. `bun test` covers it. The bridge in
  * `amp-watch-bridge.ts` only turns a parsed command into plugin calls.
  */
+import { ARM_LEVELS, DECISIONS, type ArmLevel, type Decision } from './approvals'
 
 export const MAX_PROMPT_LENGTH = 4000
 export const AGENT_MODES = ['low', 'medium', 'high', 'ultra'] as const
@@ -11,6 +12,14 @@ export type AgentMode = (typeof AGENT_MODES)[number]
 
 export const ANNOUNCE_OUTCOMES = ['done', 'error', 'cancelled', 'awaiting-approval'] as const
 export type AnnounceOutcome = (typeof ANNOUNCE_OUTCOMES)[number]
+
+/** A held tool call, as carried in an `awaiting-approval` announcement and in the push. */
+export interface ApprovalSummary {
+	id: string
+	toolName: string
+	input: string
+	inputIsComplete: boolean
+}
 
 export type WatchCommand =
 	| { type: 'prompt'; threadID: string; prompt: string; steer: boolean }
@@ -23,7 +32,24 @@ export type WatchCommand =
 	 * project thread posts these to the shared URL; only the hub turns them
 	 * into pushes. `summary` is the assistant's last line, already clipped.
 	 */
-	| { type: 'announce'; threadID: string; outcome: AnnounceOutcome; title: string | null; summary: string | null }
+	| {
+			type: 'announce'
+			threadID: string
+			outcome: AnnounceOutcome
+			title: string | null
+			summary: string | null
+			/** Present only with outcome `awaiting-approval`. */
+			approval: ApprovalSummary | null
+	  }
+	/** The watch answers a held tool call. Forwarded to the thread's own webhook. */
+	| { type: 'decide'; threadID: string; approvalID: string; decision: Decision }
+	/** The watch chooses which of a thread's tool calls are held. Forwarded likewise. */
+	| { type: 'arm'; threadID: string; level: ArmLevel }
+	/**
+	 * A thread's plugin instance tells the receiver where to forward `decide`
+	 * and `arm`. The URL is a credential; it only ever travels inside Amp.
+	 */
+	| { type: 'link'; threadID: string; approvalURL: string }
 
 export type ParseResult = { ok: true; command: WatchCommand } | { ok: false; reason: string }
 
@@ -86,6 +112,10 @@ export function parseCommand(body: Uint8Array | string | unknown): ParseResult {
 			if (!(ANNOUNCE_OUTCOMES as readonly unknown[]).includes(outcome)) {
 				return { ok: false, reason: `unknown outcome ${String(outcome)}` }
 			}
+			const approval = readApproval(fields.approval)
+			if (outcome === 'awaiting-approval' && approval === null) {
+				return { ok: false, reason: 'awaiting-approval needs an approval' }
+			}
 			return {
 				ok: true,
 				command: {
@@ -94,8 +124,43 @@ export function parseCommand(body: Uint8Array | string | unknown): ParseResult {
 					outcome: outcome as AnnounceOutcome,
 					title: optionalText(fields.title),
 					summary: optionalText(fields.summary),
+					approval: outcome === 'awaiting-approval' ? approval : null,
 				},
 			}
+		}
+		case 'decide': {
+			const threadID = readThreadID(fields)
+			if (!threadID.ok) return threadID
+			const approvalID = fields.approvalID
+			if (typeof approvalID !== 'string' || approvalID.trim().length === 0) {
+				return { ok: false, reason: 'approvalID missing' }
+			}
+			const decision = fields.decision
+			if (!(DECISIONS as readonly unknown[]).includes(decision)) {
+				return { ok: false, reason: `unknown decision ${String(decision)}` }
+			}
+			return {
+				ok: true,
+				command: { type: 'decide', threadID: threadID.value, approvalID: approvalID.trim(), decision: decision as Decision },
+			}
+		}
+		case 'arm': {
+			const threadID = readThreadID(fields)
+			if (!threadID.ok) return threadID
+			const level = fields.level
+			if (!(ARM_LEVELS as readonly unknown[]).includes(level)) {
+				return { ok: false, reason: `unknown arm level ${String(level)}` }
+			}
+			return { ok: true, command: { type: 'arm', threadID: threadID.value, level: level as ArmLevel } }
+		}
+		case 'link': {
+			const threadID = readThreadID(fields)
+			if (!threadID.ok) return threadID
+			const approvalURL = fields.approvalURL
+			if (typeof approvalURL !== 'string' || !approvalURL.startsWith('https://')) {
+				return { ok: false, reason: 'approvalURL missing or not https' }
+			}
+			return { ok: true, command: { type: 'link', threadID: threadID.value, approvalURL } }
 		}
 		default:
 			return { ok: false, reason: `unknown command type ${String(type)}` }
@@ -103,6 +168,18 @@ export function parseCommand(body: Uint8Array | string | unknown): ParseResult {
 }
 
 type Field = { ok: true; value: string } | { ok: false; reason: string }
+
+function readApproval(value: unknown): ApprovalSummary | null {
+	if (typeof value !== 'object' || value === null) return null
+	const fields = value as Record<string, unknown>
+	if (typeof fields.id !== 'string' || typeof fields.toolName !== 'string' || typeof fields.input !== 'string') return null
+	return {
+		id: fields.id,
+		toolName: fields.toolName,
+		input: fields.input,
+		inputIsComplete: fields.inputIsComplete !== false,
+	}
+}
 
 function optionalText(value: unknown): string | null {
 	if (typeof value !== 'string') return null

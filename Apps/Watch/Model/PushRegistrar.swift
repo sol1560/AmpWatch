@@ -18,6 +18,8 @@ final class PushRegistrar: NSObject, WKApplicationDelegate, UNUserNotificationCe
     private(set) var registrationProblem: String?
     /// A command produced by a notification button; `RootView` drains it.
     var pendingCommand: WatchCommand?
+    /// A held call the user tapped into; `RootView` opens its screen.
+    var pendingApproval: PendingApproval?
 
     /// Xcode installs can only be reached through the sandbox gateway.
     static var environment: PushEnvironment {
@@ -88,8 +90,13 @@ final class PushRegistrar: NSObject, WKApplicationDelegate, UNUserNotificationCe
         didReceive response: UNNotificationResponse
     ) async {
         guard let payload = PushPayload(userInfo: response.notification.request.content.userInfo) else { return }
-        let command = PushAction.command(actionIdentifier: response.actionIdentifier, payload: payload)
-        guard let command else { return }
-        await MainActor.run { pendingCommand = command }
+        switch PushAction.response(actionIdentifier: response.actionIdentifier, payload: payload) {
+        case let .send(command):
+            await MainActor.run { pendingCommand = command }
+        case let .review(approval):
+            await MainActor.run { pendingApproval = approval }
+        case .open:
+            break
+        }
     }
 }

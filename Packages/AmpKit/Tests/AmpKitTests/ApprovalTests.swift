@@ -19,6 +19,14 @@ final class PendingApprovalTests: XCTestCase {
         )
     }
 
+    func testTheFixturesCoverEachRecommendation() {
+        // The screenshots rely on this: one screen per branch of the UI.
+        let fixtures = Fixtures.approvals()
+        XCTAssertEqual(fixtures[0].recommendation(), .decide)
+        guard case .warn = fixtures[1].recommendation() else { return XCTFail("fixture 1 should warn") }
+        guard case .deferToLargerScreen = fixtures[2].recommendation() else { return XCTFail("fixture 2 should defer") }
+    }
+
     func testAnOrdinaryCommandIsDecidable() {
         XCTAssertEqual(approval("swift test").recommendation(), .decide)
     }

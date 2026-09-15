@@ -116,7 +116,18 @@ export function base64url(bytes: Uint8Array): string {
 export type PushEvent =
 	| { kind: 'thread-done'; threadID: string; title: string | null; summary: string | null }
 	| { kind: 'thread-error'; threadID: string; title: string | null; summary: string | null }
-	| { kind: 'approval'; threadID: string; title: string | null; approvalID: string; toolName: string; summary: string }
+	| {
+			kind: 'approval'
+			threadID: string
+			title: string | null
+			approvalID: string
+			toolName: string
+			/** The rendered tool input, at most `MAX_INPUT_LENGTH` characters. */
+			summary: string
+			inputIsComplete: boolean
+			/** Unix milliseconds when the bridge held the call. */
+			requestedAt: number
+	  }
 
 /** APNs rejects payloads over 4 KB; a one-line summary is plenty on a watch. */
 const MAX_SUMMARY = 160
@@ -130,7 +141,8 @@ export interface ApnsPayload {
 		'interruption-level': 'active' | 'time-sensitive'
 	}
 	threadID: string
-	approvalID?: string
+	/** Approval pushes carry the whole held call so the watch can decide offline from the alert. */
+	approval?: { id: string; toolName: string; input: string; inputIsComplete: boolean; requestedAt: number }
 }
 
 export function buildPayload(event: PushEvent): ApnsPayload {
@@ -169,7 +181,13 @@ export function buildPayload(event: PushEvent): ApnsPayload {
 					'interruption-level': 'time-sensitive',
 				},
 				threadID: event.threadID,
-				approvalID: event.approvalID,
+				approval: {
+					id: event.approvalID,
+					toolName: event.toolName,
+					input: event.summary,
+					inputIsComplete: event.inputIsComplete,
+					requestedAt: event.requestedAt,
+				},
 			}
 	}
 }

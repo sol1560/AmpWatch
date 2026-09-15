@@ -105,9 +105,62 @@ describe('parseCommand: register and announce', () => {
 	test('announce keeps title and summary optional and rejects unknown outcomes', () => {
 		expect(parseCommand({ type: 'announce', threadID: thread, outcome: 'done', summary: '  ok  ' })).toEqual({
 			ok: true,
-			command: { type: 'announce', threadID: thread, outcome: 'done', title: null, summary: 'ok' },
+			command: { type: 'announce', threadID: thread, outcome: 'done', title: null, summary: 'ok', approval: null },
 		})
 		expect(parseCommand({ type: 'announce', threadID: thread, outcome: 'running' }).ok).toBe(false)
 		expect(parseCommand({ type: 'announce', outcome: 'done' }).ok).toBe(false)
+	})
+})
+
+describe('parseCommand: approvals', () => {
+	test('an awaiting-approval announcement must carry the held call', () => {
+		expect(parseCommand({ type: 'announce', threadID: thread, outcome: 'awaiting-approval' }).ok).toBe(false)
+		const result = parseCommand({
+			type: 'announce',
+			threadID: thread,
+			outcome: 'awaiting-approval',
+			title: 't',
+			approval: { id: 'toolu_1', toolName: 'shell_command', input: 'rm -rf build' },
+		})
+		expect(result).toEqual({
+			ok: true,
+			command: {
+				type: 'announce',
+				threadID: thread,
+				outcome: 'awaiting-approval',
+				title: 't',
+				summary: null,
+				approval: { id: 'toolu_1', toolName: 'shell_command', input: 'rm -rf build', inputIsComplete: true },
+			},
+		})
+	})
+
+	test('a done announcement drops any approval it was sent with', () => {
+		const result = parseCommand({
+			type: 'announce',
+			threadID: thread,
+			outcome: 'done',
+			approval: { id: 'x', toolName: 'y', input: 'z' },
+		})
+		expect(result.ok && result.command.type === 'announce' && result.command.approval).toBe(null)
+	})
+
+	test('decide needs a thread, an approval ID and a known decision', () => {
+		expect(parseCommand({ type: 'decide', threadID: thread, approvalID: 'toolu_1', decision: 'defer' })).toEqual({
+			ok: true,
+			command: { type: 'decide', threadID: thread, approvalID: 'toolu_1', decision: 'defer' },
+		})
+		expect(parseCommand({ type: 'decide', threadID: thread, approvalID: ' ', decision: 'approve' }).ok).toBe(false)
+		expect(parseCommand({ type: 'decide', threadID: thread, approvalID: 'x', decision: 'maybe' }).ok).toBe(false)
+	})
+
+	test('arm accepts only the three levels', () => {
+		expect(parseCommand({ type: 'arm', threadID: thread, level: 'risky' }).ok).toBe(true)
+		expect(parseCommand({ type: 'arm', threadID: thread, level: 'on' }).ok).toBe(false)
+	})
+
+	test('link needs an https URL', () => {
+		expect(parseCommand({ type: 'link', threadID: thread, approvalURL: 'https://x.test/w/1' }).ok).toBe(true)
+		expect(parseCommand({ type: 'link', threadID: thread, approvalURL: 'http://x.test/w/1' }).ok).toBe(false)
 	})
 })

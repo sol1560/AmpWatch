@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { MAX_INPUT_LENGTH } from './approvals'
 import {
 	buildPayload,
 	buildProviderToken,
@@ -121,7 +122,7 @@ describe('buildPayload', () => {
 		expect(payload.aps.alert.body.length).toBe(160)
 		expect(payload.aps.category).toBe('THREAD_DONE')
 		expect(payload.aps['thread-id']).toBe('T-1')
-		expect(payload.approvalID).toBeUndefined()
+		expect(payload.approval).toBeUndefined()
 	})
 
 	test('an untitled thread with no summary still reads sensibly', () => {
@@ -137,12 +138,34 @@ describe('buildPayload', () => {
 			approvalID: 'A-9',
 			toolName: 'shell_command',
 			summary: 'rm -rf build',
+			inputIsComplete: true,
+			requestedAt: 1_700_000_000_000,
 		})
 		expect(payload.aps.category).toBe('APPROVAL')
 		expect(payload.aps['interruption-level']).toBe('time-sensitive')
 		expect(payload.aps.alert.body).toBe('shell_command: rm -rf build')
-		expect(payload.approvalID).toBe('A-9')
-		expect(JSON.stringify(payload).length).toBeLessThan(4096)
+		expect(payload.approval).toEqual({
+			id: 'A-9',
+			toolName: 'shell_command',
+			input: 'rm -rf build',
+			inputIsComplete: true,
+			requestedAt: 1_700_000_000_000,
+		})
+	})
+
+	test('an approval with the longest allowed input still fits the APNs limit', () => {
+		const payload = buildPayload({
+			kind: 'approval',
+			threadID: 'T-01a0a325-7a11-73eb-a5a7-46c40b37076d',
+			title: 'x'.repeat(200),
+			approvalID: 'toolu_01ABCDEFGHIJKLMNOPQRSTUV',
+			toolName: 'shell_command',
+			// Worst case for JSON escaping: every character doubles.
+			summary: '"\\'.repeat(MAX_INPUT_LENGTH / 2),
+			inputIsComplete: false,
+			requestedAt: 1_700_000_000_000,
+		})
+		expect(new TextEncoder().encode(JSON.stringify(payload)).length).toBeLessThan(4096)
 	})
 })
 
@@ -182,7 +205,16 @@ describe('buildRequest', () => {
 			credentials,
 			providerToken,
 			deviceToken,
-			event: { kind: 'approval', threadID: 'T-1', title: 't', approvalID: 'A', toolName: 'x', summary: 'y' },
+			event: {
+				kind: 'approval',
+				threadID: 'T-1',
+				title: 't',
+				approvalID: 'A',
+				toolName: 'x',
+				summary: 'y',
+				inputIsComplete: true,
+				requestedAt: 0,
+			},
 		})
 		expect(request.headers['apns-collapse-id']).toBeUndefined()
 	})
