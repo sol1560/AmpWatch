@@ -5,6 +5,7 @@ import XCTest
 /// These assert the accessibility tree, which is what VoiceOver and the
 /// screenshot harness both depend on. Visual correctness is verified separately
 /// by `Scripts/capture-screens.sh`, whose PNGs a human or agent reviews.
+@MainActor
 final class AmpWatchUITests: XCTestCase {
     override func setUp() {
         continueAfterFailure = false
