@@ -74,15 +74,18 @@ final class AmpWatchUITests: XCTestCase {
         // The credentials sit below the wrist preferences; `List` only
         // materialises rows once they scroll into view, and a 40mm screen
         // needs more than one swipe to get there.
-        let token = app.staticTexts["token-value"]
-        for _ in 0..<6 where !token.exists {
+        let token = app.descendants(matching: .any)["token-value"]
+        for _ in 0..<4 where !token.exists {
             settings.swipeUp()
+        }
+        for _ in 0..<4 where !token.exists {
+            app.swipeUp()
         }
         // The fixture token ends in "7f3a"; a screenshot of this screen ends up
         // in a public CI artifact, so only that suffix may be on screen.
-        XCTAssertTrue(token.waitForExistence(timeout: 5))
+        XCTAssertTrue(token.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertEqual(token.label, "…7f3a")
-        XCTAssertEqual(app.staticTexts["webhook-value"].label, "hooks.example.test")
+        XCTAssertEqual(app.descendants(matching: .any)["webhook-value"].label, "hooks.example.test")
         XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "fixture-token")).firstMatch.exists)
     }
 

@@ -126,7 +126,20 @@ struct GlanceView: View {
     // MARK: Inline — one sentence
 
     private var inline: some View {
-        Text(spokenSummary)
+        Text(inlineText)
+            .lineLimit(1)
+    }
+
+    /// Inline gets one short line next to the time; the full sentence is
+    /// what VoiceOver reads.
+    private var inlineText: String {
+        guard let glance, !stale else { return "Amp: open to refresh" }
+        switch kind {
+        case .awaiting:
+            return glance.awaiting > 0 ? "\(glance.awaiting) held · \(glance.live) moving" : "\(glance.live) moving"
+        case .spend:
+            return "\(Money.compact(usd: glance.spentTodayUSD)) today"
+        }
     }
 
     /// Doubles as the VoiceOver label for every family.

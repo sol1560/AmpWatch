@@ -62,6 +62,7 @@ jobs:
             -scheme AmpWatch \
             -destination "platform=watchOS Simulator,id=${{ steps.sim.outputs.udid }}" \
             -derivedDataPath .build/DerivedData \
+            -resultBundlePath .build/AmpWatch.xcresult \
             CODE_SIGNING_ALLOWED=NO \
             | xcbeautify
 
@@ -72,6 +73,16 @@ jobs:
           app=$(find .build/DerivedData/Build/Products -name 'AmpWatch.app' -maxdepth 3 | head -1)
           test -n "$app" || { echo "AmpWatch.app not found"; exit 1; }
           Scripts/capture-screens.sh "${{ steps.sim.outputs.udid }}" "$app" .artifacts/screens
+
+      - name: Upload the test result bundle
+        # Only when something failed: it holds the assertion messages and the
+        # element tree xcbeautify trims from the log.
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcresult
+          path: .build/AmpWatch.xcresult
+          if-no-files-found: ignore
 
       - name: Upload screenshots
         if: always()
