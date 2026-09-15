@@ -34,4 +34,9 @@ adversarial_each_milestone=false, adversarial_final=true, use_test_agent=true
 
 ## Experiment outcomes
 
-(filled in during M2/M3)
+- Webhook ownership (2026-09-15, threads A=T-01a0a325…, B=T-01a0a3cd…): shared
+  key → same URL, delivered to the first registrant only, sticky across
+  re-registration. Per-thread key → distinct URL, delivered to that thread.
+  Plugin cwd is `.amp/plugins`. Details in docs/DESIGN.md.
+- Consequence: M3 becomes pushes (APNs), M4 becomes approvals; the watch talks
+  only to the hub, which forwards decisions to per-thread approval webhooks.

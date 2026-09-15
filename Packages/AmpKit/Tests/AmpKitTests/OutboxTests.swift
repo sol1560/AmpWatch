@@ -42,7 +42,7 @@ final class OutboxTests: XCTestCase {
     private func prompt(_ id: String, _ text: String, at offset: TimeInterval = 0) -> OutboxItem {
         OutboxItem(
             id: id,
-            command: .prompt(threadID: "T-1", text: text),
+            command: .prompt(threadID: "T-1", text: text, steer: true),
             createdAt: t0.addingTimeInterval(offset)
         )
     }

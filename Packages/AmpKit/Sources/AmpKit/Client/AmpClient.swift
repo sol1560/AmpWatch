@@ -33,5 +33,17 @@ extension AmpClient {
 /// different credentials: reads go to the External API, writes go to an Amp
 /// plugin webhook.
 public protocol AmpPromptSink: Sendable {
-    func send(prompt: String, to threadID: String) async throws
+    /// Delivers one command. `idempotencyKey` lets a retry of the same
+    /// user action (an outbox item) be deduplicated upstream; pass `nil` for
+    /// a fresh action.
+    func send(_ command: WatchCommand, idempotencyKey: String?) async throws
+}
+
+extension AmpPromptSink {
+    /// Steering prompt to a thread, the common case from the wrist.
+    public func send(prompt: String, to threadID: String) async throws {
+        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        try await send(.prompt(threadID: threadID, text: trimmed, steer: true), idempotencyKey: nil)
+    }
 }

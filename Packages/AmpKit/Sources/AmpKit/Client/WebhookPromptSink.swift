@@ -25,11 +25,9 @@ public struct WebhookPromptSink: AmpPromptSink {
         self.makeIdempotencyKey = makeIdempotencyKey
     }
 
-    public func send(prompt: String, to threadID: String) async throws {
-        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-
-        let payload = Payload(threadID: threadID, prompt: trimmed)
+    public func send(_ command: WatchCommand, idempotencyKey: String?) async throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
         let request = HTTPRequest(
             method: "POST",
             url: webhookURL,
@@ -37,17 +35,12 @@ public struct WebhookPromptSink: AmpPromptSink {
                 "Content-Type": "application/json",
                 // Amp deduplicates retries by this key without consuming rate
                 // capacity, so a flaky watch radio does not double-prompt.
-                "Idempotency-Key": makeIdempotencyKey(),
+                "Idempotency-Key": idempotencyKey ?? makeIdempotencyKey(),
             ],
-            body: try JSONEncoder().encode(payload)
+            body: try encoder.encode(command.wireObject)
         )
 
         let response = try await transport.send(request)
         if let error = AmpError.from(response: response) { throw error }
-    }
-
-    private struct Payload: Encodable {
-        let threadID: String
-        let prompt: String
     }
 }

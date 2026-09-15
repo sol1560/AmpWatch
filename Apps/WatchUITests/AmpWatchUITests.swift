@@ -79,6 +79,23 @@ final class AmpWatchUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "fixture-token")).firstMatch.exists)
     }
 
+    func testDetailOffersStopOnlyBehindAConfirmation() {
+        let app = launch(screen: "detail")
+        XCTAssertTrue(app.descendants(matching: .any)["thread-detail"].waitForExistence(timeout: 20))
+        // The fixture thread was updated 12 s ago, so it counts as live and
+        // must offer Stop — but never send on the first tap.
+        let stop = app.buttons["cancel-button"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 5))
+        stop.tap()
+        XCTAssertTrue(app.buttons["cancel-confirm-button"].waitForExistence(timeout: 5))
+    }
+
+    func testNewThreadCannotStartWithoutAPrompt() {
+        let app = launch(screen: "new-thread")
+        XCTAssertTrue(app.descendants(matching: .any)["new-thread"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["start-button"].isEnabled)
+    }
+
     func testDetailShowsFullTitleInBodyNotOnlyInBar() {
         let app = launch(screen: "detail")
         XCTAssertTrue(app.descendants(matching: .any)["thread-detail"].waitForExistence(timeout: 20))

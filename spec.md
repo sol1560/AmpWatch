@@ -60,18 +60,7 @@ both register the same key, determine which thread's handler receives a
 POST, whether the URL is identical, and whether a POST reaches a paused
 orb. Write the result into `docs/DESIGN.md` and adapt M3 to it.
 
-### M3 — Approvals
-
-The plugin's `tool.call` handler, when the thread is armed for watch
-approvals, reports the pending call and awaits a decision delivered through
-whichever channel the M2 experiment showed to work (same-process webhook,
-per-thread webhook key, or a polled decision store). The watch shows an
-approval screen built on `PendingApproval.recommendation()`; Approve is
-absent when the recommendation is `deferToLargerScreen`. The pending-handler
-ceiling is measured with a deliberately slow handler and written down; on
-timeout the handler returns `reject-and-continue` with a stated reason.
-
-### M4 — Pushes
+### M3 — Pushes
 
 The plugin sends APNs pushes through the orb's `curl --http2` using
 credentials from environment variables (never files in the repo). Pushes
@@ -80,6 +69,16 @@ for remote notifications, stores its device token, and offers notification
 actions Approve / Reject / Continue. End-to-end delivery needs the owner's
 `.p8` key and cannot be exercised in CI; the push-building code is unit
 tested and the manual steps are documented in `docs/PUSH.md`.
+
+### M4 — Approvals
+
+The plugin's `tool.call` handler, when the thread is armed for watch
+approvals, reports the pending call and awaits a decision delivered through
+a per-thread webhook key (`approve-<threadID>`), forwarded by the hub. The watch shows an
+approval screen built on `PendingApproval.recommendation()`; Approve is
+absent when the recommendation is `deferToLargerScreen`. The pending-handler
+ceiling is measured with a deliberately slow handler and written down; on
+timeout the handler returns `reject-and-continue` with a stated reason.
 
 ### M5 — Working offline and faster
 

@@ -2,11 +2,7 @@ import Foundation
 
 /// Something the user asked for that must reach Amp eventually.
 public struct OutboxItem: Sendable, Hashable, Identifiable, Codable {
-    public enum Command: Sendable, Hashable, Codable {
-        case prompt(threadID: String, text: String)
-        case decide(approvalID: String, threadID: String, decision: ApprovalDecision)
-        case cancel(threadID: String)
-    }
+    public typealias Command = WatchCommand
 
     public let id: String
     public let command: Command

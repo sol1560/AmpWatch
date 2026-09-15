@@ -39,14 +39,25 @@ struct ThreadListView: View {
         .containerBackground(AmpTheme.canvas.gradient, for: .navigation)
         .navigationTitle("amp")
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .topBarLeading) {
                 NavigationLink {
                     SettingsView()
                 } label: {
                     Image(systemName: "gearshape")
+                        .foregroundStyle(AmpTheme.canvas)
                 }
                 .accessibilityLabel("Settings")
                 .accessibilityIdentifier("settings-button")
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink {
+                    NewThreadView()
+                } label: {
+                    Image(systemName: "plus")
+                        .foregroundStyle(AmpTheme.canvas)
+                }
+                .accessibilityLabel("New thread")
+                .accessibilityIdentifier("new-thread-button")
             }
         }
         .task { await model.load(from: amp) }

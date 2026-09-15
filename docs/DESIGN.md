@@ -101,22 +101,41 @@ thread X: tool.call fires
    └─▶ returns { action: 'allow' }
 ```
 
-**Unknown 1 — webhook ownership.** The docs say project threads owned by the
-same user *share* one registration per key, and the handler context names "the
-thread that owns this webhook registration". If deliveries always land in the
-hub's handler, the hub cannot resolve a promise living in thread X's plugin
-process. The fallback is a tiny decision store the per-thread handlers poll
-(one Supabase table would do; the watch writes, the handler reads). Measured
-first in M3 because it decides whether a second component exists at all.
+**Unknown 1 — webhook ownership. Measured 2026-09-15.** Two orb threads of
+this project (A = `T-01a0a325-7a11-73eb-a5a7-46c40b37076d`, B =
+`T-01a0a3cd-4f9f-74a0-aaec-54300f07549c`) both registered key `amp-watch`.
+
+- Both received byte-identical capability URLs (same SHA-256).
+- A registered first. Two POSTs made *by B* (before and after A re-registered)
+  were both handled by **A's** handler; B's handler never fired. Ownership is
+  sticky to the first registrant and re-registration does not move it.
+- A key that only B registered (`exp-per-thread-b`) produced a **different**
+  URL and its events were delivered to **B's** handler.
+- The plugin process's working directory is `.amp/plugins`, not the workspace
+  root; use `amp.system.workspaceRoot` for paths.
+
+Consequence: the hub owns `amp-watch`; approvals use a per-thread key
+`approve-<threadID>` whose URL only that thread's handler receives. The
+per-thread instance tells the hub its approval URL by POSTing to the shared
+URL (registering `amp-watch` from a non-hub thread is harmless: it returns the
+hub's URL without taking ownership). The watch only ever talks to the hub; the
+hub forwards decisions. No external store is needed.
+
+Not measured: what happens to ownership when the owning orb is paused or
+archived. Until it is, the hub thread stays awake during use (see cost note).
 
 **Unknown 2 — how long a `tool.call` handler may stay pending.** Not
 documented. If the ceiling is short, the handler returns `reject-and-continue`
 with a stated reason at the deadline and the watch offers "retry with approval
-pre-granted for this exact call".
+pre-granted for this exact call". Measured in the approvals milestone.
 
 **Unknown 3 — does a webhook delivery resume a paused orb?** If yes, the hub
 needs no `keepAlive()` and costs nothing between commands. If no, the hub holds
-the lease during school hours and releases it after. Cheap to test in M3.
+the lease during school hours and releases it after. Still open.
+
+**Ordering change.** Because the watch can only learn about a pending
+approval (and its ID) through a push, APNs moves ahead of approvals:
+M3 = pushes, M4 = approvals.
 
 ## Features, by whether they keep you in control
 

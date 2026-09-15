@@ -37,7 +37,29 @@ final class WebhookPromptSinkTests: XCTestCase {
             [String: String].self,
             from: try XCTUnwrap(request.body)
         )
-        XCTAssertEqual(body, ["threadID": "T-1", "prompt": "run the tests"])
+        XCTAssertEqual(body, ["type": "steer", "threadID": "T-1", "prompt": "run the tests"])
+    }
+
+    func testEveryCommandHasTheWireShapeThePluginParses() async throws {
+        let transport = StubTransport(responses: Array(repeating: HTTPResponse(status: 202), count: 4))
+        let sink = WebhookPromptSink(webhookURL: webhook, transport: transport)
+
+        try await sink.send(.prompt(threadID: "T-1", text: "go", steer: false), idempotencyKey: "outbox-7")
+        try await sink.send(.cancel(threadID: "T-1"), idempotencyKey: nil)
+        try await sink.send(.create(prompt: "new thread", mode: .high), idempotencyKey: nil)
+        try await sink.send(.decide(approvalID: "call-9", threadID: "T-1", decision: .reject), idempotencyKey: nil)
+
+        let bodies = try transport.requests.map {
+            try JSONDecoder().decode([String: String].self, from: try XCTUnwrap($0.body))
+        }
+        XCTAssertEqual(bodies, [
+            ["type": "prompt", "threadID": "T-1", "prompt": "go"],
+            ["type": "cancel", "threadID": "T-1"],
+            ["type": "create", "prompt": "new thread", "mode": "high"],
+            ["type": "decide", "approvalID": "call-9", "threadID": "T-1", "decision": "reject"],
+        ])
+        // An outbox retry reuses its item ID so Amp can collapse duplicates.
+        XCTAssertEqual(transport.requests[0].headers["Idempotency-Key"], "outbox-7")
     }
 
     func testEachSendGetsAFreshIdempotencyKey() async throws {

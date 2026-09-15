@@ -76,6 +76,7 @@ enum ScreenshotScene: String, CaseIterable {
     case usage
     case setup
     case settings
+    case newThread = "new-thread"
 
     static let launchArgument = "-ampwatch-screen"
 
@@ -113,6 +114,8 @@ enum ScreenshotScene: String, CaseIterable {
             NavigationStack { SetupView() }.tint(AmpTheme.ember)
         case .settings:
             NavigationStack { SettingsView() }.tint(AmpTheme.ember)
+        case .newThread:
+            NavigationStack { NewThreadView() }.tint(AmpTheme.ember)
         }
     }
 }

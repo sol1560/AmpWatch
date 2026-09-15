@@ -4,7 +4,27 @@ import AmpKit
 @MainActor
 @Observable
 final class ThreadDetailModel {
+    enum CancelStatus: Equatable {
+        case idle, confirming, sending, sent, failed(String)
+    }
+
     private(set) var state: Loadable<[ThreadMessage]> = .loading
+    var cancelStatus: CancelStatus = .idle
+
+    func cancel(threadID: String, using environment: AmpEnvironment) async {
+        guard let sink = environment.promptSink else {
+            cancelStatus = .failed("No bridge configured")
+            return
+        }
+        cancelStatus = .sending
+        do {
+            try await sink.send(.cancel(threadID: threadID), idempotencyKey: nil)
+            cancelStatus = .sent
+        } catch {
+            let amp = error as? AmpError ?? .transport(String(describing: error))
+            cancelStatus = .failed(amp.watchDescription)
+        }
+    }
 
     func load(threadID: String, from environment: AmpEnvironment) async {
         do {
@@ -71,10 +91,53 @@ struct ThreadDetailView: View {
                     Label("Cost", systemImage: "dollarsign.circle")
                 }
                 .tint(AmpTheme.parchmentDim)
+
+                // Cancel is only offered while the thread looks mid-turn;
+                // cancelling an idle thread is a no-op that costs rate budget.
+                if thread.activity(now: amp.now()) == .live {
+                    cancelControl
+                }
             }
             .padding(.bottom, 8)
         }
         .accessibilityIdentifier("thread-detail")
+    }
+
+    @ViewBuilder
+    private var cancelControl: some View {
+        switch model.cancelStatus {
+        case .idle:
+            Button(role: .destructive) {
+                model.cancelStatus = .confirming
+            } label: {
+                Label("Stop", systemImage: "stop.fill")
+            }
+            .tint(AmpTheme.ember)
+            .accessibilityIdentifier("cancel-button")
+        case .confirming:
+            HStack {
+                Button("Stop turn", role: .destructive) {
+                    Task { await model.cancel(threadID: thread.id, using: amp) }
+                }
+                .tint(AmpTheme.ember)
+                .accessibilityIdentifier("cancel-confirm-button")
+                Button("Keep") { model.cancelStatus = .idle }
+                    .tint(AmpTheme.parchmentDim)
+            }
+            .font(AmpTheme.body(12))
+        case .sending:
+            Text("stopping…")
+                .font(AmpTheme.body(11))
+                .foregroundStyle(AmpTheme.parchmentDim)
+        case .sent:
+            Text("stop requested")
+                .font(AmpTheme.body(11))
+                .foregroundStyle(AmpTheme.parchment)
+        case let .failed(message):
+            Text(message)
+                .font(AmpTheme.body(11))
+                .foregroundStyle(AmpTheme.ember)
+        }
     }
 
     private var header: some View {

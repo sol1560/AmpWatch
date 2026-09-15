@@ -116,7 +116,7 @@ public actor FixtureAmpClient: AmpClient, AmpPromptSink {
 
     private let behavior: Behavior
     private let now: Date
-    public private(set) var sentPrompts: [(threadID: String, prompt: String)] = []
+    public private(set) var sent: [WatchCommand] = []
 
     public init(behavior: Behavior = .ok, now: Date = Fixtures.referenceDate) {
         self.behavior = behavior
@@ -140,9 +140,9 @@ public actor FixtureAmpClient: AmpClient, AmpPromptSink {
         return Fixtures.usage()
     }
 
-    public func send(prompt: String, to threadID: String) async throws {
+    public func send(_ command: WatchCommand, idempotencyKey: String?) async throws {
         try check()
-        sentPrompts.append((threadID, prompt))
+        sent.append(command)
     }
 
     private func check() throws {
