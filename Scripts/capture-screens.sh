@@ -14,7 +14,7 @@ app_path=${2:?path to the built .app required}
 out_dir=${3:-.artifacts/screens}
 
 bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${app_path}/Info.plist")
-screens=(threads threads-empty threads-error threads-queued threads-over-cap detail detail-over-cap compose usage setup settings new-thread approval approval-destructive approval-deferred phrases templates glance glance-spend)
+screens=(threads threads-empty threads-error threads-queued threads-over-cap detail detail-over-cap compose usage setup settings new-thread approval approval-destructive approval-deferred approval-expired phrases templates glance glance-spend)
 
 mkdir -p "$out_dir"
 

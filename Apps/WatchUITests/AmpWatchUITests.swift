@@ -159,6 +159,19 @@ final class AmpWatchUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["approval-defer-reason"].exists)
     }
 
+    func testExpiredApprovalOffersNoDecisionAtAll() {
+        let app = launch(screen: "approval-expired")
+        XCTAssertTrue(app.descendants(matching: .any)["approval"].waitForExistence(timeout: 20))
+        // The bridge already rejected this call. Any button here would send
+        // a decision into nothing — or onto a later call with the same id.
+        XCTAssertTrue(app.descendants(matching: .any)["approval-expired"].exists)
+        XCTAssertFalse(app.buttons["approve-button"].exists)
+        XCTAssertFalse(app.buttons["reject-button"].exists)
+        XCTAssertFalse(app.buttons["defer-button"].exists)
+        // The command stays visible so the user knows what was skipped.
+        XCTAssertTrue(app.staticTexts["approval-command"].label.contains("swift build"))
+    }
+
     func testQueuedCommandsShowAboveTheThreadList() {
         let app = launch(screen: "threads-queued")
         XCTAssertTrue(app.descendants(matching: .any)["thread-list"].waitForExistence(timeout: 20))

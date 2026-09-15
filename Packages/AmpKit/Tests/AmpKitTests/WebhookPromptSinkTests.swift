@@ -37,7 +37,7 @@ final class WebhookPromptSinkTests: XCTestCase {
             [String: String].self,
             from: try XCTUnwrap(request.body)
         )
-        XCTAssertEqual(body, ["type": "steer", "threadID": "T-1", "prompt": "run the tests"])
+        XCTAssertEqual(body, ["type": "steer", "threadID": "T-1", "prompt": "run the tests", "commandID": "key-1"])
     }
 
     func testEveryCommandHasTheWireShapeThePluginParses() async throws {
@@ -47,14 +47,17 @@ final class WebhookPromptSinkTests: XCTestCase {
         try await sink.send(.prompt(threadID: "T-1", text: "go", steer: false), idempotencyKey: "outbox-7")
         try await sink.send(.cancel(threadID: "T-1"), idempotencyKey: nil)
         try await sink.send(.create(prompt: "new thread", mode: .high), idempotencyKey: nil)
-        try await sink.send(.decide(approvalID: "call-9", threadID: "T-1", decision: .reject), idempotencyKey: nil)
+        try await sink.send(.decide(approvalID: "call-9", threadID: "T-1", decision: .reject, requestedAt: .distantPast), idempotencyKey: nil)
         try await sink.send(.arm(threadID: "T-1", level: .risky), idempotencyKey: nil)
         try await sink.send(.register(deviceToken: "ab12", environment: .production), idempotencyKey: nil)
 
         let bodies = try transport.requests.map {
             try JSONDecoder().decode([String: String].self, from: try XCTUnwrap($0.body))
         }
-        XCTAssertEqual(bodies, [
+        // Every body names the key it was sent under, so the bridge can
+        // dedupe the copy it forwards to a thread's own webhook.
+        XCTAssertEqual(bodies.map { $0["commandID"] }, transport.requests.map { $0.headers["Idempotency-Key"] })
+        XCTAssertEqual(bodies.map { $0.filter { $0.key != "commandID" } }, [
             ["type": "prompt", "threadID": "T-1", "prompt": "go"],
             ["type": "cancel", "threadID": "T-1"],
             ["type": "create", "prompt": "new thread", "mode": "high"],

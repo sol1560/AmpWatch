@@ -92,6 +92,21 @@ describe('ApprovalQueue', () => {
 		expect(queue.pending()).toEqual([])
 	})
 
+	test('a decision sent for the wrong thread is refused and the call keeps waiting', async () => {
+		const queue = new ApprovalQueue()
+		const outcome = queue.wait(request('a'), 30)
+		expect(queue.decide('a', 'approve', 'T-2')).toBe(false)
+		expect(queue.pending()).toHaveLength(1)
+		expect(await outcome).toBe('timeout')
+	})
+
+	test('a decision that names the right thread is accepted', async () => {
+		const queue = new ApprovalQueue()
+		const outcome = queue.wait(request('a'), 1000)
+		expect(queue.decide('a', 'approve', 'T-1')).toBe(true)
+		expect(await outcome).toBe('approve')
+	})
+
 	test('a decision for an unknown call is reported as such', () => {
 		expect(new ApprovalQueue().decide('nope', 'approve')).toBe(false)
 	})

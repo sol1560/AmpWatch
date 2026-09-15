@@ -94,9 +94,9 @@ struct RootView: View {
         guard let token = push?.deviceToken, case .ready(_, .some(_)) = session else { return }
         try? secrets.write(token, for: .deviceToken)
         // Best effort: the bridge only learns the token this way, and the next
-        // launch tries again. A fixed id means an offline launch queues one
-        // registration, not one per retry.
-        _ = await environment.deliver(.register(deviceToken: token, environment: PushRegistrar.environment), id: "register")
+        // launch tries again. The outbox keeps only the newest registration
+        // (`Outbox.supersedes`), so offline launches queue one, not one each.
+        _ = await environment.deliver(.register(deviceToken: token, environment: PushRegistrar.environment))
     }
 
     private func sendPendingCommand() async {
@@ -128,7 +128,9 @@ struct RootView: View {
     }
 
     private static func load(_ secrets: any SecretStore) -> AmpSession {
-        AmpSession.load(from: secrets, transport: URLSessionTransport())
+        // Fail fast rather than wait for connectivity: the outbox is the
+        // retry, and a spinner that outlives a wrist raise is a hang.
+        AmpSession.load(from: secrets, transport: .watchDefault())
     }
 }
 
@@ -150,6 +152,7 @@ enum ScreenshotScene: String, CaseIterable {
     case approval
     case approvalDestructive = "approval-destructive"
     case approvalDeferred = "approval-deferred"
+    case approvalExpired = "approval-expired"
     case threadsQueued = "threads-queued"
     case threadsOverCap = "threads-over-cap"
     case detailOverCap = "detail-over-cap"
@@ -214,6 +217,8 @@ enum ScreenshotScene: String, CaseIterable {
             NavigationStack { ApprovalView(approval: Fixtures.approvals()[1]) }.tint(AmpTheme.ember)
         case .approvalDeferred:
             NavigationStack { ApprovalView(approval: Fixtures.approvals()[2]) }.tint(AmpTheme.ember)
+        case .approvalExpired:
+            NavigationStack { ApprovalView(approval: Fixtures.approvals()[3]) }.tint(AmpTheme.ember)
         case .phrases:
             NavigationStack { PhrasesView() }.tint(AmpTheme.ember)
         case .templates:

@@ -58,3 +58,13 @@ adversarial_each_milestone=false, adversarial_final=true, use_test_agent=true
   of usage for threads changed since local midnight, and the list now
   fetches usage for those threads too (was: live only). Always-on: ember
   only on the approval screen; transcript and command text `privacySensitive`.
+- Final review batch: transport / 429 / 5xx errors retry without counting
+  toward `maxAttempts`; only 4xx do. A held call is rejected by the bridge
+  10 min after `requestedAt`, and the watch shows "expired" with no buttons
+  once its own clock says so. Banner Approve only when the command is whole,
+  unflagged and ≤160 characters. "Sent" copy says "approval sent", not "ran".
+  If the hub cannot be reached at announce time the bridge rejects the call
+  instead of holding it. Every announce carries the thread's approval URL, so
+  a hub restart does not lose the link. The forwarded decide/arm hop dedupes
+  on `commandID`. `Glance` schema was not versioned (skipped; no shipped
+  readers yet).

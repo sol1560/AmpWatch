@@ -60,7 +60,7 @@ struct ThreadListView: View {
                 ErrorView(error: error) { await model.load(from: amp) }
             case let .loaded(threads) where threads.isEmpty:
                 EmptyStateView(
-                    headline: "Nothing running",
+                    headline: "Nothing moving",
                     detail: "Start a thread on the web or in the CLI."
                 )
             case let .loaded(threads):

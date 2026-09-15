@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 import { MAX_INPUT_LENGTH } from './approvals'
 import {
+	MAX_PAYLOAD_BYTES,
 	buildPayload,
 	buildProviderToken,
 	buildRequest,
+	byteLength,
 	isDeviceToken,
 	readCredentials,
 	tokenIsFresh,
@@ -167,6 +169,47 @@ describe('buildPayload', () => {
 		})
 		expect(new TextEncoder().encode(JSON.stringify(payload)).length).toBeLessThan(4096)
 	})
+	test('a CJK command is clipped by bytes, not characters, and marked incomplete', () => {
+		// 1500 CJK characters are 4500 bytes in UTF-8: under MAX_INPUT_LENGTH by
+		// characters, but over the APNs limit once serialised.
+		const payload = buildPayload({
+			kind: 'approval',
+			threadID: 'T-4',
+			title: 'x',
+			approvalID: 'A',
+			toolName: 'shell_command',
+			summary: '测'.repeat(1500),
+			inputIsComplete: true,
+			requestedAt: 1,
+		})
+		expect(byteLength(payload)).toBeLessThanOrEqual(MAX_PAYLOAD_BYTES)
+		expect(payload.approval?.inputIsComplete).toBe(false)
+		expect(payload.approval?.input.length).toBeGreaterThan(0)
+		expect(/^测+$/.test(payload.approval?.input ?? '')).toBe(true)
+	})
+
+	test('a short command that fits is left complete', () => {
+		const payload = buildPayload({
+			kind: 'approval',
+			threadID: 'T-4',
+			title: 'x',
+			approvalID: 'A',
+			toolName: 'shell_command',
+			summary: '测'.repeat(100),
+			inputIsComplete: true,
+			requestedAt: 1,
+		})
+		expect(payload.approval?.inputIsComplete).toBe(true)
+		expect(payload.approval?.input).toBe('测'.repeat(100))
+	})
+
+	test('a long title is clipped to 80 characters with an ellipsis', () => {
+		const payload = buildPayload({ kind: 'thread-done', threadID: 'T-5', title: 'a'.repeat(81), summary: null })
+		expect(payload.aps.alert.title.length).toBe(80)
+		expect(payload.aps.alert.title.endsWith('…')).toBe(true)
+		const exact = buildPayload({ kind: 'thread-done', threadID: 'T-5', title: 'a'.repeat(80), summary: null })
+		expect(exact.aps.alert.title).toBe('a'.repeat(80))
+	})
 })
 
 describe('buildRequest', () => {
@@ -180,11 +223,13 @@ describe('buildRequest', () => {
 			providerToken,
 			deviceToken,
 			event: { kind: 'thread-done', threadID: 'T-1', title: 't', summary: null },
+			now: 5_000_000,
 		})
 		expect(request.url).toBe(`https://api.push.apple.com/3/device/${deviceToken}`)
 		expect(request.headers.authorization).toBe('bearer h.c.s')
 		expect(request.headers['apns-topic']).toBe('com.soll.ampwatch.watchkitapp')
 		expect(request.headers['apns-push-type']).toBe('alert')
+		// Expiry counts from the send time (5_000_000 ms), not from the token's issuedAt.
 		expect(request.headers['apns-expiration']).toBe(String(5000 + 600))
 		expect(request.headers['apns-collapse-id']).toBe('T-1')
 		expect(JSON.parse(request.body).threadID).toBe('T-1')
@@ -196,6 +241,7 @@ describe('buildRequest', () => {
 			providerToken,
 			deviceToken,
 			event: { kind: 'thread-done', threadID: 'T-1', title: 't', summary: null },
+			now: 5_000_000,
 		})
 		expect(request.url.startsWith('https://api.sandbox.push.apple.com/')).toBe(true)
 	})
@@ -215,6 +261,7 @@ describe('buildRequest', () => {
 				inputIsComplete: true,
 				requestedAt: 0,
 			},
+			now: 5_000_000,
 		})
 		expect(request.headers['apns-collapse-id']).toBeUndefined()
 	})

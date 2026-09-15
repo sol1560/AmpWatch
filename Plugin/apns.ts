@@ -129,8 +129,16 @@ export type PushEvent =
 			requestedAt: number
 	  }
 
-/** APNs rejects payloads over 4 KB; a one-line summary is plenty on a watch. */
-const MAX_SUMMARY = 160
+/** The alert body: one line the wrist can read. The watch approves from the banner only when the whole command fits here. */
+export const MAX_SUMMARY = 160
+/**
+ * APNs rejects a payload over 4096 bytes. That is bytes, not characters: a
+ * command in Chinese is three bytes a character, and JSON escaping adds
+ * more. Everything but the command is small, so the command is what gives.
+ */
+export const MAX_PAYLOAD_BYTES = 3900
+/** Thread titles are free text; a long one must not push the command out. */
+const MAX_TITLE = 80
 
 export interface ApnsPayload {
 	aps: {
@@ -146,7 +154,30 @@ export interface ApnsPayload {
 }
 
 export function buildPayload(event: PushEvent): ApnsPayload {
-	const title = event.title?.trim() || 'Untitled thread'
+	const payload = buildUnclippedPayload(event)
+	if (byteLength(payload) <= MAX_PAYLOAD_BYTES || !payload.approval) return payload
+	// Cut the command until the whole thing fits. A cut command is marked
+	// incomplete, so the watch shows it but refuses to approve it.
+	const over = byteLength(payload) - MAX_PAYLOAD_BYTES
+	let input = payload.approval.input
+	// Each character is at most four bytes (six once JSON-escaped); trim by
+	// bytes rather than guessing at characters, then confirm.
+	let keep = Math.max(0, input.length - over)
+	input = input.slice(0, keep)
+	let clipped: ApnsPayload = { ...payload, approval: { ...payload.approval, input, inputIsComplete: false } }
+	while (byteLength(clipped) > MAX_PAYLOAD_BYTES && keep > 0) {
+		keep = Math.max(0, keep - 64)
+		clipped = { ...clipped, approval: { ...clipped.approval!, input: input.slice(0, keep) } }
+	}
+	return clipped
+}
+
+export function byteLength(payload: ApnsPayload): number {
+	return new TextEncoder().encode(JSON.stringify(payload)).byteLength
+}
+
+function buildUnclippedPayload(event: PushEvent): ApnsPayload {
+	const title = clipTitle(event.title)
 	switch (event.kind) {
 		case 'thread-done':
 			return {
@@ -198,6 +229,11 @@ function clip(text: string | null | undefined): string | null {
 	return trimmed.length <= MAX_SUMMARY ? trimmed : trimmed.slice(0, MAX_SUMMARY - 1) + '…'
 }
 
+function clipTitle(text: string | null | undefined): string {
+	const trimmed = text?.replace(/\s+/g, ' ').trim() || 'Untitled thread'
+	return trimmed.length <= MAX_TITLE ? trimmed : trimmed.slice(0, MAX_TITLE - 1) + '…'
+}
+
 // ---------------------------------------------------------------- request
 
 export interface ApnsRequest {
@@ -205,6 +241,9 @@ export interface ApnsRequest {
 	headers: Record<string, string>
 	body: string
 }
+
+/** How long APNs keeps trying to deliver a push to a watch that is off the network. */
+export const PUSH_TTL_SECONDS = 10 * 60
 
 /**
  * The HTTP request for one push. `apns-collapse-id` is the thread ID, so a
@@ -216,6 +255,8 @@ export function buildRequest(options: {
 	providerToken: ProviderToken
 	deviceToken: string
 	event: PushEvent
+	/** Unix milliseconds; the expiry counts from when the push is sent, not from when the provider token was minted. */
+	now: number
 }): ApnsRequest {
 	const payload = buildPayload(options.event)
 	const headers: Record<string, string> = {
@@ -223,8 +264,9 @@ export function buildRequest(options: {
 		'apns-topic': BUNDLE_ID,
 		'apns-push-type': 'alert',
 		'apns-priority': '10',
-		// Ten minutes: a state change older than that is stale on a wrist.
-		'apns-expiration': String(options.providerToken.issuedAt + 10 * 60),
+		// Ten minutes: a state change older than that is stale on a wrist,
+		// and a held call has been rejected by then anyway.
+		'apns-expiration': String(Math.floor(options.now / 1000) + PUSH_TTL_SECONDS),
 	}
 	if (options.event.kind !== 'approval') headers['apns-collapse-id'] = options.event.threadID
 	return {

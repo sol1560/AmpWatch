@@ -109,10 +109,15 @@ export class ApprovalQueue {
 		})
 	}
 
-	/** Returns false when no call with that ID is waiting. */
-	decide(id: string, decision: Decision): boolean {
+	/**
+	 * Returns false when no call with that ID is waiting, or when the waiting
+	 * call belongs to a different thread than the decision names: the watch
+	 * decided about something else, and a stray approve must not land here.
+	 */
+	decide(id: string, decision: Decision, threadID?: string): boolean {
 		const waiter = this.waiters.get(id)
 		if (!waiter) return false
+		if (threadID !== undefined && waiter.request.threadID !== threadID) return false
 		if (decision === 'defer') return true
 		clearTimeout(waiter.timer)
 		this.waiters.delete(id)

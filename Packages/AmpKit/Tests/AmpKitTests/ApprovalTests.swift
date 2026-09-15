@@ -22,45 +22,66 @@ final class PendingApprovalTests: XCTestCase {
     func testTheFixturesCoverEachRecommendation() {
         // The screenshots rely on this: one screen per branch of the UI.
         let fixtures = Fixtures.approvals()
-        XCTAssertEqual(fixtures[0].recommendation(), .decide)
-        guard case .warn = fixtures[1].recommendation() else { return XCTFail("fixture 1 should warn") }
-        guard case .deferToLargerScreen = fixtures[2].recommendation() else { return XCTFail("fixture 2 should defer") }
+        XCTAssertEqual(fixtures[0].recommendation(now: t0), .decide)
+        guard case .warn = fixtures[1].recommendation(now: t0) else { return XCTFail("fixture 1 should warn") }
+        guard case .deferToLargerScreen = fixtures[2].recommendation(now: t0) else { return XCTFail("fixture 2 should defer") }
+        XCTAssertEqual(fixtures[3].recommendation(now: t0), .expired)
+    }
+
+    func testAnApprovalExpiresExactlyWhenTheBridgeStopsWaiting() {
+        let held = approval("swift test")
+        XCTAssertEqual(held.recommendation(now: held.deadline), .decide, "the last second still counts")
+        XCTAssertEqual(held.recommendation(now: held.deadline.addingTimeInterval(1)), .expired)
+        // Expiry beats every other verdict: a cut, dangerous command that has
+        // expired has nothing left to warn about.
+        let gone = approval("rm -rf /", complete: false)
+        XCTAssertEqual(gone.recommendation(now: gone.deadline.addingTimeInterval(60)), .expired)
+    }
+
+    func testTheDecisionCommandCarriesTheBridgeClockNotTheTap() {
+        let held = approval("swift test")
+        guard case let .decide(id, threadID, decision, requestedAt) = held.decision(.reject) else {
+            return XCTFail("expected a decision")
+        }
+        XCTAssertEqual([id, threadID], ["call-1", "T-1"])
+        XCTAssertEqual(decision, .reject)
+        XCTAssertEqual(requestedAt, t0)
     }
 
     func testAnOrdinaryCommandIsDecidable() {
-        XCTAssertEqual(approval("swift test").recommendation(), .decide)
+        XCTAssertEqual(approval("swift test").recommendation(now: t0), .decide)
     }
 
     func testTruncatedInputIsNeverApprovable() {
         // Approving what you cannot see is the failure this type prevents. A
         // truncated command must not offer Approve at all, even when the
         // visible part looks harmless.
-        guard case .deferToLargerScreen = approval("swift test", complete: false).recommendation() else {
+        guard case .deferToLargerScreen = approval("swift test", complete: false).recommendation(now: t0) else {
             return XCTFail("truncated input must defer")
         }
     }
 
     func testOverlongInputDefersEvenWhenComplete() {
         let long = String(repeating: "a", count: PendingApproval.maxReadableInputLength + 1)
-        guard case .deferToLargerScreen = approval(long).recommendation() else {
+        guard case .deferToLargerScreen = approval(long).recommendation(now: t0) else {
             return XCTFail("unreadably long input must defer")
         }
         // Exactly at the limit is still readable.
         let atLimit = String(repeating: "a", count: PendingApproval.maxReadableInputLength)
-        XCTAssertEqual(approval(atLimit).recommendation(), .decide)
+        XCTAssertEqual(approval(atLimit).recommendation(now: t0), .decide)
     }
 
     func testDestructiveCommandsAreFlagged() {
         for command in ["rm -rf /tmp/x", "git push --force", "git reset --hard HEAD~3",
                         "psql -c 'DROP TABLE users'", "cat ~/.ssh/id_rsa"] {
-            guard case .warn = approval(command).recommendation() else {
+            guard case .warn = approval(command).recommendation(now: t0) else {
                 return XCTFail("\(command) should warn")
             }
         }
     }
 
     func testFlaggingIsCaseInsensitive() {
-        guard case let .warn(signals) = approval("psql -c 'Drop Table Users'").recommendation() else {
+        guard case let .warn(signals) = approval("psql -c 'Drop Table Users'").recommendation(now: t0) else {
             return XCTFail("should warn regardless of case")
         }
         XCTAssertEqual(signals.map(\.label), ["drops a table"])
@@ -68,7 +89,7 @@ final class PendingApprovalTests: XCTestCase {
 
     func testEachRiskIsReportedOnceEvenWithSeveralMatches() {
         // "rm -rf" and "rm -fr" share a label; the warning should not repeat it.
-        guard case let .warn(signals) = approval("rm -rf a && rm -fr b").recommendation() else {
+        guard case let .warn(signals) = approval("rm -rf a && rm -fr b").recommendation(now: t0) else {
             return XCTFail("should warn")
         }
         XCTAssertEqual(signals.count, 1)
@@ -77,7 +98,7 @@ final class PendingApprovalTests: XCTestCase {
     func testTruncationOutranksEverythingElse() {
         // A truncated destructive command must defer, not merely warn: warning
         // would still present an Approve button for an unreadable command.
-        guard case .deferToLargerScreen = approval("rm -rf /", complete: false).recommendation() else {
+        guard case .deferToLargerScreen = approval("rm -rf /", complete: false).recommendation(now: t0) else {
             return XCTFail("truncation must win over warning")
         }
     }

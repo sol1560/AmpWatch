@@ -39,7 +39,10 @@ public enum WatchCommand: Sendable, Hashable, Codable {
     case prompt(threadID: String, text: String, steer: Bool)
     case cancel(threadID: String)
     case create(prompt: String, mode: AgentMode)
-    case decide(approvalID: String, threadID: String, decision: ApprovalDecision)
+    /// `requestedAt` is when the bridge held the call; it never goes on the
+    /// wire, but the outbox uses it to drop a decision the bridge has already
+    /// stopped waiting for.
+    case decide(approvalID: String, threadID: String, decision: ApprovalDecision, requestedAt: Date)
     /// Choose which of a thread's commands wait for the watch.
     case arm(threadID: String, level: ArmLevel)
     /// Tell the bridge where to send pushes. Sent on every launch, because the
@@ -49,7 +52,7 @@ public enum WatchCommand: Sendable, Hashable, Codable {
     /// The thread this command acts on, if it acts on one.
     public var threadID: String? {
         switch self {
-        case let .prompt(threadID, _, _), let .cancel(threadID), let .decide(_, threadID, _), let .arm(threadID, _): threadID
+        case let .prompt(threadID, _, _), let .cancel(threadID), let .decide(_, threadID, _, _), let .arm(threadID, _): threadID
         case .create, .register: nil
         }
     }
@@ -65,7 +68,7 @@ public enum WatchCommand: Sendable, Hashable, Codable {
             ["type": "cancel", "threadID": threadID]
         case let .create(prompt, mode):
             ["type": "create", "prompt": prompt, "mode": mode.rawValue]
-        case let .decide(approvalID, threadID, decision):
+        case let .decide(approvalID, threadID, decision, _):
             ["type": "decide", "approvalID": approvalID, "threadID": threadID, "decision": decision.rawValue]
         case let .arm(threadID, level):
             ["type": "arm", "threadID": threadID, "level": level.rawValue]

@@ -90,7 +90,7 @@ final class PushRegistrar: NSObject, WKApplicationDelegate, UNUserNotificationCe
         didReceive response: UNNotificationResponse
     ) async {
         guard let payload = PushPayload(userInfo: response.notification.request.content.userInfo) else { return }
-        switch PushAction.response(actionIdentifier: response.actionIdentifier, payload: payload) {
+        switch PushAction.response(actionIdentifier: response.actionIdentifier, payload: payload, now: Date()) {
         case let .send(command):
             await MainActor.run { pendingCommand = command }
         case let .review(approval):

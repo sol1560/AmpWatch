@@ -67,7 +67,10 @@ public struct PushPayload: Sendable, Equatable {
               let id = fields["id"] as? String, !id.isEmpty,
               let toolName = fields["toolName"] as? String,
               let input = fields["input"] as? String,
-              let requestedAt = fields["requestedAt"] as? Double
+              let requestedAt = fields["requestedAt"] as? Double,
+              // The bridge always writes this. A payload without it is not
+              // one of ours, and guessing "complete" would fail open.
+              let inputIsComplete = fields["inputIsComplete"] as? Bool
         else { return nil }
         return PendingApproval(
             id: id,
@@ -75,8 +78,7 @@ public struct PushPayload: Sendable, Equatable {
             toolName: toolName,
             input: input,
             requestedAt: Date(timeIntervalSince1970: requestedAt / 1000),
-            // Absent means complete; the bridge only writes the key when it cut the text.
-            inputIsComplete: (fields["inputIsComplete"] as? Bool) ?? true
+            inputIsComplete: inputIsComplete
         )
     }
 }
@@ -95,10 +97,11 @@ extension PushAction {
     /// Maps a notification response to what the app should do.
     ///
     /// Approve from the notification banner is only honoured when the command
-    /// is one the watch would have offered a plain Approve for. Anything the
-    /// approval screen would warn about, or refuse to show, goes to that
-    /// screen instead — the banner never lets a warning be skipped.
-    public static func response(actionIdentifier: String, payload: PushPayload) -> PushResponse {
+    /// is one the watch would have offered a plain Approve for, and the banner
+    /// showed all of it. Anything the approval screen would warn about, refuse
+    /// to show, or that has already expired goes to that screen instead — the
+    /// banner never lets a warning be skipped.
+    public static func response(actionIdentifier: String, payload: PushPayload, now: Date) -> PushResponse {
         guard let action = PushAction(rawValue: actionIdentifier) else {
             // A plain tap: land on the approval if there is one, else the list.
             return payload.approval.map(PushResponse.review) ?? .open
@@ -110,11 +113,12 @@ extension PushAction {
             return .send(.prompt(threadID: payload.threadID, text: "Try again.", steer: false))
         case .approve:
             guard let approval = payload.approval else { return .open }
-            guard approval.recommendation() == .decide else { return .review(approval) }
-            return .send(.decide(approvalID: approval.id, threadID: payload.threadID, decision: .approve))
+            guard approval.recommendation(now: now) == .decide, approval.fitsInBanner else { return .review(approval) }
+            return .send(approval.decision(.approve))
         case .reject:
             guard let approval = payload.approval else { return .open }
-            return .send(.decide(approvalID: approval.id, threadID: payload.threadID, decision: .reject))
+            guard !approval.isExpired(now: now) else { return .review(approval) }
+            return .send(approval.decision(.reject))
         }
     }
 }

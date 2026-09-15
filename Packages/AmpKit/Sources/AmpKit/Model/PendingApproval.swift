@@ -56,6 +56,29 @@ extension PendingApproval {
         case warn([DestructiveSignal])
         /// Do not offer Approve at all; offer Defer and "open on phone".
         case deferToLargerScreen(reason: String)
+        /// The bridge stopped waiting and rejected the call itself. Nothing
+        /// the watch sends now can change that, so offer nothing.
+        case expired
+    }
+
+    /// How long the bridge holds a call before rejecting it on its own.
+    ///
+    /// `APPROVAL_TIMEOUT_MS` in `Plugin/amp-watch-bridge.ts` is the other
+    /// half of this number; a test keeps them equal.
+    public static let decisionWindow: TimeInterval = 10 * 60
+
+    /// The moment after which a decision lands on nothing.
+    public var deadline: Date { requestedAt.addingTimeInterval(Self.decisionWindow) }
+
+    public func isExpired(now: Date) -> Bool { now > deadline }
+
+    /// What the notification banner shows of the command. Approve from the
+    /// banner is only honoured when the whole command fits there, mirroring
+    /// `MAX_SUMMARY` in `Plugin/apns.ts`.
+    public static let bannerLength = 160
+
+    public var fitsInBanner: Bool {
+        toolName.count + 2 + input.count <= Self.bannerLength
     }
 
     /// Substring patterns, matched case-insensitively.
@@ -100,7 +123,8 @@ extension PendingApproval {
     /// answer is "decide this somewhere else".
     public static let maxReadableInputLength = 600
 
-    public func recommendation() -> Recommendation {
+    public func recommendation(now: Date) -> Recommendation {
+        guard !isExpired(now: now) else { return .expired }
         guard inputIsComplete else {
             return .deferToLargerScreen(reason: "The command was truncated before it reached the watch.")
         }
@@ -109,6 +133,11 @@ extension PendingApproval {
         }
         let signals = destructiveSignals
         return signals.isEmpty ? .decide : .warn(signals)
+    }
+
+    /// The command that answers this approval.
+    public func decision(_ decision: ApprovalDecision) -> WatchCommand {
+        .decide(approvalID: id, threadID: threadID, decision: decision, requestedAt: requestedAt)
     }
 
     public func waitedSeconds(now: Date) -> TimeInterval {

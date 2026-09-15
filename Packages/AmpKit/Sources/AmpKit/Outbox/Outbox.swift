@@ -56,15 +56,18 @@ public actor Outbox {
     /// Attempts before an item is dropped rather than retried forever.
     public static let maxAttempts = 5
 
-    /// How long an approval stays meaningful.
-    ///
-    /// The bridge rejects a held call nobody decided within
-    /// `APPROVAL_TIMEOUT_MS` (10 minutes in `Plugin/amp-watch-bridge.ts`), so a
-    /// decision older than that would land on nothing. Keep the two in step.
-    public static let decisionTTL: TimeInterval = 10 * 60
+    /// How long an approval stays meaningful, counted from when the bridge
+    /// held the call — not from the tap. Same number as the bridge's own
+    /// timeout; see `PendingApproval.decisionWindow`.
+    public static let decisionTTL: TimeInterval = PendingApproval.decisionWindow
 
     private var items: [OutboxItem] = []
     private let now: @Sendable () -> Date
+    /// The flush currently sending, if any. Actors are re-entrant at every
+    /// `await`, and three things call `flush` (a timer, wrist raise, each new
+    /// submit); two passes over the same queue would send an item twice and
+    /// drop the one behind it. Later callers wait for this and then run.
+    private var inFlight: Task<OutboxFlush, Never>?
     /// Where the queue survives an app kill. `nil` keeps it in memory only,
     /// which is what tests and screenshots want.
     private let fileURL: URL?
@@ -113,21 +116,23 @@ public actor Outbox {
         persist()
     }
 
-    /// Replaces any queued decision for the same approval.
-    ///
-    /// Changing your mind before the link returns must send one decision, not
-    /// two contradictory ones.
-    public func enqueueDecision(id: String, approvalID: String, threadID: String, decision: ApprovalDecision) {
-        items.removeAll {
-            if case let .decide(existing, _, _) = $0.command { return existing == approvalID }
-            return false
+    /// Enqueues `item` after removing every queued item `supersededBy` says it
+    /// replaces. This is how a changed mind sends one decision rather than two
+    /// contradictory ones, and how the latest arm level wins.
+    public func enqueue(_ item: OutboxItem, replacing superseded: (OutboxItem) -> Bool) {
+        items.removeAll { $0.id != item.id && superseded($0) }
+        enqueue(item)
+    }
+
+    /// Whether two commands answer the same question, so the later one should
+    /// replace the earlier in the queue.
+    public static func supersedes(_ new: WatchCommand, _ old: WatchCommand) -> Bool {
+        switch (new, old) {
+        case let (.decide(a, _, _, _), .decide(b, _, _, _)): a == b
+        case let (.arm(a, _), .arm(b, _)): a == b
+        case (.register, .register): true
+        default: false
         }
-        items.append(OutboxItem(
-            id: id,
-            command: .decide(approvalID: approvalID, threadID: threadID, decision: decision),
-            createdAt: now()
-        ))
-        persist()
     }
 
     public func remove(id: String) {
@@ -139,42 +144,74 @@ public actor Outbox {
     ///
     /// Stops at the first failure and keeps the rest queued, preserving order.
     /// `send` must be idempotent on the item's `id`: an item whose send throws
-    /// may already have been applied upstream, and is retried.
+    /// may already have been applied upstream, and is retried. Only one pass
+    /// runs at a time; a call made mid-pass waits for it and then makes its
+    /// own pass, so anything enqueued meanwhile still goes out.
     @discardableResult
-    public func flush(_ send: @Sendable (OutboxItem) async throws -> Void) async -> OutboxFlush {
+    public func flush(_ send: @escaping @Sendable (OutboxItem) async throws -> Void) async -> OutboxFlush {
+        while let running = inFlight {
+            _ = await running.value
+            // Whoever wakes first clears the finished pass. If only its
+            // creator did, a waiter resuming before it would see the same
+            // finished task, re-await it without yielding, and hold the
+            // actor forever.
+            if inFlight == running { inFlight = nil }
+        }
+        let pass = Task { await self.drain(send) }
+        inFlight = pass
+        let result = await pass.value
+        if inFlight == pass { inFlight = nil }
+        return result
+    }
+
+    private func drain(_ send: @Sendable (OutboxItem) async throws -> Void) async -> OutboxFlush {
         var delivered: [String] = []
         var dropped: [(id: String, reason: OutboxDrop)] = []
 
+        // Everything below the `await` touches the queue by id, never by
+        // position: while a send is out, an enqueue can replace the item
+        // (same id) or supersede it (a changed mind), so index 0 may no
+        // longer be the item that was sent.
         while let item = items.first {
             if isExpired(item) {
-                items.removeFirst()
+                items.removeAll { $0.id == item.id }
                 dropped.append((item.id, .expired))
+                persist()
                 continue
             }
 
             do {
                 try await send(item)
-                items.removeFirst()
+                // The queue on disk must forget this before anything else
+                // happens: a kill here would otherwise re-send it on launch.
+                items.removeAll { $0.id == item.id }
                 delivered.append(item.id)
+                persist()
             } catch {
-                let retried = item.retried()
+                // No link is not a strike against the item; only a reply
+                // that says "no" counts, or the poison would be dropped
+                // while the user is still in the stairwell.
+                if (error as? AmpError)?.isRetryable == true { break }
+                guard let index = items.firstIndex(where: { $0.id == item.id }) else { continue }
+                let retried = items[index].retried()
                 if retried.attempts >= Self.maxAttempts {
-                    items.removeFirst()
+                    items.remove(at: index)
                     dropped.append((item.id, .exhausted))
+                    persist()
                     // A poison item must not block the queue behind it.
                     continue
                 }
-                items[0] = retried
+                items[index] = retried
+                persist()
                 break
             }
         }
 
-        persist()
         return OutboxFlush(delivered: delivered, dropped: dropped, remaining: items.count)
     }
 
     private func isExpired(_ item: OutboxItem) -> Bool {
-        guard case .decide = item.command else { return false }
-        return now().timeIntervalSince(item.createdAt) > Self.decisionTTL
+        guard case let .decide(_, _, _, requestedAt) = item.command else { return false }
+        return now() > requestedAt.addingTimeInterval(Self.decisionTTL)
     }
 }

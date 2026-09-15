@@ -30,16 +30,14 @@ public struct Dispatcher: Sendable {
     /// `id` is the idempotency key Amp sees, so the same user action retried
     /// after a lost reply is applied once. It defaults to a fresh UUID.
     public func submit(_ command: WatchCommand, id: String = UUID().uuidString, at now: Date = Date()) async -> DeliveryOutcome {
-        if case let .decide(approvalID, threadID, decision) = command {
-            await outbox.enqueueDecision(id: id, approvalID: approvalID, threadID: threadID, decision: decision)
-        } else {
-            await outbox.enqueue(OutboxItem(id: id, command: command, createdAt: now))
-        }
+        await outbox.enqueue(OutboxItem(id: id, command: command, createdAt: now)) { Outbox.supersedes(command, $0.command) }
         let result = await flush()
         if result.delivered.contains(id) { return .delivered }
         if let drop = result.dropped.first(where: { $0.id == id }) { return .dropped(drop.reason) }
         let pending = await outbox.pending
-        let position = pending.firstIndex(where: { $0.id == id }) ?? pending.count
+        // Not in this pass's results and no longer queued: a flush that was
+        // already running when we enqueued picked it up and delivered it.
+        guard let position = pending.firstIndex(where: { $0.id == id }) else { return .delivered }
         return .queued(behind: position)
     }
 

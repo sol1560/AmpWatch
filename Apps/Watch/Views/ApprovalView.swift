@@ -12,8 +12,7 @@ final class ApprovalModel {
 
     func send(_ decision: ApprovalDecision, for approval: PendingApproval, using environment: AmpEnvironment) async {
         status = .sending
-        let command = WatchCommand.decide(approvalID: approval.id, threadID: approval.threadID, decision: decision)
-        guard let outcome = await environment.deliver(command) else {
+        guard let outcome = await environment.deliver(approval.decision(decision)) else {
             status = .failed("No bridge configured")
             return
         }
@@ -27,11 +26,12 @@ final class ApprovalModel {
 
 /// One held tool call and the buttons the watch is willing to offer for it.
 ///
-/// The shape of the screen follows `PendingApproval.recommendation()`:
+/// The shape of the screen follows `PendingApproval.recommendation(now:)`:
 /// a plain command gets Approve first; a flagged one gets the warning first
 /// and Approve last, unhighlighted; a command the watch cannot show whole gets
-/// no Approve at all. The command text is always on screen, above the buttons,
-/// so a decision is never made from a summary.
+/// no Approve at all; one the bridge has stopped waiting for gets no buttons.
+/// The command text is always on screen, above the buttons, so a decision is
+/// never made from a summary.
 struct ApprovalView: View {
     let approval: PendingApproval
 
@@ -42,7 +42,7 @@ struct ApprovalView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
                 header
-                switch approval.recommendation() {
+                switch approval.recommendation(now: amp.now()) {
                 case .decide:
                     command
                     decideButtons(primaryApprove: true)
@@ -53,6 +53,9 @@ struct ApprovalView: View {
                 case let .deferToLargerScreen(reason):
                     command
                     deferral(reason)
+                case .expired:
+                    command
+                    expired
                 }
                 statusLine
             }
@@ -72,7 +75,9 @@ struct ApprovalView: View {
                 .foregroundStyle(AmpTheme.parchment)
                 .accessibilityIdentifier("approval-tool")
             Spacer()
-            Text("waiting \(RelativeTime.short(from: approval.requestedAt, to: amp.now()))")
+            Text(approval.isExpired(now: amp.now())
+                 ? "expired"
+                 : "waiting \(RelativeTime.short(from: approval.requestedAt, to: amp.now()))")
                 .font(AmpTheme.body(12))
                 .foregroundStyle(AmpTheme.parchmentDim)
         }
@@ -170,6 +175,16 @@ struct ApprovalView: View {
         }
     }
 
+    private var expired: some View {
+        // The bridge rejects a held call after `PendingApproval.decisionWindow`
+        // (`APPROVAL_TIMEOUT_MS` in the plugin). A decision sent now would
+        // either be dropped or, worse, land on a later call.
+        Text("The agent stopped waiting after \(Int(PendingApproval.decisionWindow / 60)) min and rejected it. Nothing to decide.")
+            .font(AmpTheme.body(12))
+            .foregroundStyle(AmpTheme.parchmentDim)
+            .accessibilityIdentifier("approval-expired")
+    }
+
     @ViewBuilder
     private var statusLine: some View {
         switch model.status {
@@ -200,10 +215,12 @@ struct ApprovalView: View {
         }
     }
 
+    /// The bridge accepts the decision; it never confirms what the agent did
+    /// with it, so the copy says what was sent, not what happened.
     private func sentLabel(_ decision: ApprovalDecision) -> String {
         switch decision {
-        case .approve: "approved — it runs now"
-        case .reject: "rejected — it will not run"
+        case .approve: "approval sent"
+        case .reject: "rejection sent"
         case .defer_: "left waiting"
         }
     }

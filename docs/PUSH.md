@@ -79,9 +79,10 @@ If nothing arrives:
   thread. The list is sorted by activity, so the thread is at the top.
 - Approval pushes (category `APPROVAL`) arrive only for threads the watch has
   armed from the thread screen ("Ask me first"). The banner's Approve button
-  is honoured only for a command the approval screen would not warn about;
-  anything flagged, or too long to show whole, opens the screen instead.
-  Reject from the banner always goes through.
+  is honoured only for a command the approval screen would not warn about,
+  that arrived whole (`inputIsComplete`), that fits in the banner (160
+  characters) and whose decision window has not passed; anything else opens
+  the screen instead. Reject from the banner always goes through.
 - The arm level is kept in the thread's plugin memory. When that orb restarts
   the thread is unarmed again, and the picker on the watch will be wrong until
   you set it again.

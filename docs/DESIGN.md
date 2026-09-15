@@ -196,8 +196,9 @@ phrases**, Scribble, the watch keyboard, then dictation.
   flagged before you can approve
 - When the input does not fit, the default action is **Defer**, not Approve
 - No auto-approval, ever. No "approve all".
-- If the last push is older than the decision TTL, the button is absent, not
-  disabled-looking-clickable — the watch may be looking at a stale request
+- A request older than the decision window (10 min from when the agent asked)
+  has already been rejected by the bridge. The screen says so and shows no
+  buttons — not disabled-looking-clickable ones
 
 ## Architecture
 

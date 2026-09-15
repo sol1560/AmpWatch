@@ -31,6 +31,16 @@ public enum AmpError: Error, Equatable, Sendable {
 }
 
 extension AmpError {
+    /// Whether the same request could succeed later without anyone changing
+    /// anything: no link, a busy server, a broken one. A 4xx is an answer.
+    public var isRetryable: Bool {
+        switch self {
+        case .transport, .rateLimited: true
+        case let .server(status, _): status >= 500
+        case .unauthorized, .forbidden, .notFound, .decoding: false
+        }
+    }
+
     /// Short enough for a 40mm screen.
     public var watchDescription: String {
         switch self {

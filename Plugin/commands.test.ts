@@ -105,7 +105,15 @@ describe('parseCommand: register and announce', () => {
 	test('announce keeps title and summary optional and rejects unknown outcomes', () => {
 		expect(parseCommand({ type: 'announce', threadID: thread, outcome: 'done', summary: '  ok  ' })).toEqual({
 			ok: true,
-			command: { type: 'announce', threadID: thread, outcome: 'done', title: null, summary: 'ok', approval: null },
+			command: {
+				type: 'announce',
+				threadID: thread,
+				outcome: 'done',
+				title: null,
+				summary: 'ok',
+				approval: null,
+				approvalURL: null,
+			},
 		})
 		expect(parseCommand({ type: 'announce', threadID: thread, outcome: 'running' }).ok).toBe(false)
 		expect(parseCommand({ type: 'announce', outcome: 'done' }).ok).toBe(false)
@@ -120,7 +128,13 @@ describe('parseCommand: approvals', () => {
 			threadID: thread,
 			outcome: 'awaiting-approval',
 			title: 't',
-			approval: { id: 'toolu_1', toolName: 'shell_command', input: 'rm -rf build' },
+			approval: {
+				id: 'toolu_1',
+				toolName: 'shell_command',
+				input: 'rm -rf build',
+				inputIsComplete: true,
+				requestedAt: 1_700_000_000_000,
+			},
 		})
 		expect(result).toEqual({
 			ok: true,
@@ -130,9 +144,38 @@ describe('parseCommand: approvals', () => {
 				outcome: 'awaiting-approval',
 				title: 't',
 				summary: null,
-				approval: { id: 'toolu_1', toolName: 'shell_command', input: 'rm -rf build', inputIsComplete: true },
+				approval: {
+					id: 'toolu_1',
+					toolName: 'shell_command',
+					input: 'rm -rf build',
+					inputIsComplete: true,
+					requestedAt: 1_700_000_000_000,
+				},
+				approvalURL: null,
 			},
 		})
+	})
+
+	test('an approval without the completeness flag or the request time is not trusted', () => {
+		const base = { type: 'announce', threadID: thread, outcome: 'awaiting-approval', title: 't' }
+		const approval = { id: 'toolu_1', toolName: 'shell_command', input: 'rm -rf build' }
+		expect(parseCommand({ ...base, approval: { ...approval, requestedAt: 1 } }).ok).toBe(false)
+		expect(parseCommand({ ...base, approval: { ...approval, inputIsComplete: true } }).ok).toBe(false)
+		expect(parseCommand({ ...base, approval: { ...approval, inputIsComplete: 'yes', requestedAt: 1 } }).ok).toBe(false)
+		expect(parseCommand({ ...base, approval: { ...approval, inputIsComplete: true, requestedAt: 0 } }).ok).toBe(false)
+		expect(parseCommand({ ...base, approval: { ...approval, inputIsComplete: false, requestedAt: 1 } }).ok).toBe(true)
+	})
+
+	test('an announce carries its approval URL only when it is https', () => {
+		const base = { type: 'announce', threadID: thread, outcome: 'done' }
+		const https = parseCommand({ ...base, approvalURL: 'https://hub.example/webhook/abc' })
+		expect(https.ok && https.command.type === 'announce' && https.command.approvalURL).toBe(
+			'https://hub.example/webhook/abc',
+		)
+		const http = parseCommand({ ...base, approvalURL: 'http://hub.example/webhook/abc' })
+		expect(http.ok && http.command.type === 'announce' && http.command.approvalURL).toBe(null)
+		const number = parseCommand({ ...base, approvalURL: 42 })
+		expect(number.ok && number.command.type === 'announce' && number.command.approvalURL).toBe(null)
 	})
 
 	test('a done announcement drops any approval it was sent with', () => {
@@ -148,8 +191,10 @@ describe('parseCommand: approvals', () => {
 	test('decide needs a thread, an approval ID and a known decision', () => {
 		expect(parseCommand({ type: 'decide', threadID: thread, approvalID: 'toolu_1', decision: 'defer' })).toEqual({
 			ok: true,
-			command: { type: 'decide', threadID: thread, approvalID: 'toolu_1', decision: 'defer' },
+			command: { type: 'decide', threadID: thread, approvalID: 'toolu_1', decision: 'defer', commandID: null },
 		})
+		const keyed = parseCommand({ type: 'decide', threadID: thread, approvalID: 'toolu_1', decision: 'approve', commandID: ' k-1 ' })
+		expect(keyed.ok && keyed.command.type === 'decide' && keyed.command.commandID).toBe('k-1')
 		expect(parseCommand({ type: 'decide', threadID: thread, approvalID: ' ', decision: 'approve' }).ok).toBe(false)
 		expect(parseCommand({ type: 'decide', threadID: thread, approvalID: 'x', decision: 'maybe' }).ok).toBe(false)
 	})

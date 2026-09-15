@@ -31,12 +31,13 @@ struct GlancePublisher: Sendable {
     /// Held tool calls the user has not acted on: their notifications are
     /// still in Notification Center. Tapping one — the banner button or the
     /// notification itself — removes it, so this needs no bookkeeping of its
-    /// own. One the bridge has already given up on (older than the decision
-    /// window) is not waiting on anyone and is left out.
+    /// own. One the bridge has already given up on is not waiting on anyone
+    /// and is left out; that is judged by the bridge's own clock in the
+    /// payload, not by when the push happened to arrive on the wrist.
     private static func awaitingApprovals(now: Date) async -> Int {
         await UNUserNotificationCenter.current().deliveredNotifications()
-            .filter { $0.request.content.categoryIdentifier == PushCategory.approval.rawValue }
-            .filter { now.timeIntervalSince($0.date) <= Outbox.decisionTTL }
+            .compactMap { PushPayload(userInfo: $0.request.content.userInfo)?.approval }
+            .filter { !$0.isExpired(now: now) }
             .count
     }
 }

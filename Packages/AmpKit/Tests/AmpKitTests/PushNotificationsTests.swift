@@ -16,6 +16,9 @@ final class PushNotificationsTests: XCTestCase {
         "requestedAt": 1_773_480_020_000.0,
     ]
 
+    /// A moment inside the plain approval's window.
+    private let now = Date(timeIntervalSince1970: 1_773_480_060)
+
     private var plain: PendingApproval {
         PendingApproval(
             id: "call-3",
@@ -43,54 +46,89 @@ final class PushNotificationsTests: XCTestCase {
         XCTAssertEqual(PushPayload(userInfo: ["threadID": "T-1", "approval": fields]), PushPayload(threadID: "T-1"))
     }
 
-    func testRequestedAtIsMillisecondsAndCompletenessDefaultsToTrue() {
+    func testRequestedAtIsMilliseconds() {
+        let payload = PushPayload(userInfo: ["threadID": "T-1", "approval": approvalFields])
+        XCTAssertEqual(payload?.approval?.requestedAt, Date(timeIntervalSince1970: 1_773_480_020))
+    }
+
+    func testAnApprovalWithoutTheCompletenessFlagIsNotTrustedAsComplete() {
+        // The bridge always writes the key. Missing it means this is not a
+        // payload we built, and "assume complete" would let a cut command
+        // through to Approve.
         var fields = approvalFields
         fields["inputIsComplete"] = nil
-        let payload = PushPayload(userInfo: ["threadID": "T-1", "approval": fields])
-        XCTAssertEqual(payload?.approval?.requestedAt, Date(timeIntervalSince1970: 1_773_480_020))
-        XCTAssertEqual(payload?.approval?.inputIsComplete, true)
+        XCTAssertEqual(PushPayload(userInfo: ["threadID": "T-1", "approval": fields]), PushPayload(threadID: "T-1"))
     }
 
     func testContinueIsAQueuedPromptNotASteer() {
         XCTAssertEqual(
-            PushAction.response(actionIdentifier: "CONTINUE", payload: PushPayload(threadID: "T-1")),
+            PushAction.response(actionIdentifier: "CONTINUE", payload: PushPayload(threadID: "T-1"), now: now),
             .send(.prompt(threadID: "T-1", text: "Continue.", steer: false))
         )
     }
 
     func testApproveFromTheBannerOnlyForACommandTheScreenWouldNotWarnAbout() {
-        XCTAssertEqual(PushAction.response(actionIdentifier: "APPROVE", payload: PushPayload(threadID: "T-1")), .open)
+        XCTAssertEqual(PushAction.response(actionIdentifier: "APPROVE", payload: PushPayload(threadID: "T-1"), now: now), .open)
         XCTAssertEqual(
-            PushAction.response(actionIdentifier: "APPROVE", payload: PushPayload(threadID: "T-1", approval: plain)),
-            .send(.decide(approvalID: "call-3", threadID: "T-1", decision: .approve))
+            PushAction.response(actionIdentifier: "APPROVE", payload: PushPayload(threadID: "T-1", approval: plain), now: now),
+            .send(plain.decision(.approve))
         )
         // A force push warns on the screen, so the banner must not approve it.
-        let risky = PendingApproval(id: "call-4", threadID: "T-1", toolName: "shell_command", input: "git push -f", requestedAt: .distantPast)
+        let risky = PendingApproval(id: "call-4", threadID: "T-1", toolName: "shell_command", input: "git push -f", requestedAt: now)
         XCTAssertEqual(
-            PushAction.response(actionIdentifier: "APPROVE", payload: PushPayload(threadID: "T-1", approval: risky)),
+            PushAction.response(actionIdentifier: "APPROVE", payload: PushPayload(threadID: "T-1", approval: risky), now: now),
             .review(risky)
         )
         // A truncated command cannot be approved anywhere; the screen says why.
-        let cut = PendingApproval(id: "call-5", threadID: "T-1", toolName: "shell_command", input: "ls", requestedAt: .distantPast, inputIsComplete: false)
+        let cut = PendingApproval(id: "call-5", threadID: "T-1", toolName: "shell_command", input: "ls", requestedAt: now, inputIsComplete: false)
         XCTAssertEqual(
-            PushAction.response(actionIdentifier: "APPROVE", payload: PushPayload(threadID: "T-1", approval: cut)),
+            PushAction.response(actionIdentifier: "APPROVE", payload: PushPayload(threadID: "T-1", approval: cut), now: now),
             .review(cut)
         )
     }
 
     func testRejectFromTheBannerIsAlwaysHonoured() {
-        let risky = PendingApproval(id: "call-4", threadID: "T-1", toolName: "shell_command", input: "git push -f", requestedAt: .distantPast)
+        let risky = PendingApproval(id: "call-4", threadID: "T-1", toolName: "shell_command", input: "git push -f", requestedAt: now)
         XCTAssertEqual(
-            PushAction.response(actionIdentifier: "REJECT", payload: PushPayload(threadID: "T-1", approval: risky)),
-            .send(.decide(approvalID: "call-4", threadID: "T-1", decision: .reject))
+            PushAction.response(actionIdentifier: "REJECT", payload: PushPayload(threadID: "T-1", approval: risky), now: now),
+            .send(risky.decision(.reject))
+        )
+    }
+
+    func testTheBannerDoesNotApproveACommandItCouldNotShowWhole() {
+        // The alert body is clipped at 160 characters (`MAX_SUMMARY` in
+        // Plugin/apns.ts). Approving from a clipped banner is approving a
+        // command you did not read.
+        let long = PendingApproval(
+            id: "call-6", threadID: "T-1", toolName: "shell_command",
+            input: String(repeating: "swift build && ", count: 12), requestedAt: now
+        )
+        XCTAssertTrue(long.input.count < PendingApproval.maxReadableInputLength, "still readable on the screen")
+        XCTAssertEqual(
+            PushAction.response(actionIdentifier: "APPROVE", payload: PushPayload(threadID: "T-1", approval: long), now: now),
+            .review(long)
+        )
+    }
+
+    func testAnExpiredApprovalGoesToTheScreenFromEitherButton() {
+        // The bridge rejected the call ten minutes after holding it. A banner
+        // left on the wrist since then must not send a decision into nothing.
+        let late = plain.deadline.addingTimeInterval(1)
+        XCTAssertEqual(
+            PushAction.response(actionIdentifier: "APPROVE", payload: PushPayload(threadID: "T-1", approval: plain), now: late),
+            .review(plain)
+        )
+        XCTAssertEqual(
+            PushAction.response(actionIdentifier: "REJECT", payload: PushPayload(threadID: "T-1", approval: plain), now: late),
+            .review(plain)
         )
     }
 
     func testAPlainTapOpensTheApprovalIfThereIsOne() {
         // UNNotificationDefaultActionIdentifier, spelled out to keep AmpKit off UserNotifications.
         let tap = "com.apple.UNNotificationDefaultActionIdentifier"
-        XCTAssertEqual(PushAction.response(actionIdentifier: tap, payload: PushPayload(threadID: "T-1")), .open)
-        XCTAssertEqual(PushAction.response(actionIdentifier: tap, payload: PushPayload(threadID: "T-1", approval: plain)), .review(plain))
+        XCTAssertEqual(PushAction.response(actionIdentifier: tap, payload: PushPayload(threadID: "T-1"), now: now), .open)
+        XCTAssertEqual(PushAction.response(actionIdentifier: tap, payload: PushPayload(threadID: "T-1", approval: plain), now: now), .review(plain))
     }
 
     func testEveryCategoryHasAtLeastOneActionAndTheStringsMatchThePlugin() {

@@ -108,14 +108,26 @@ final class OutboxTests: XCTestCase {
         XCTAssertEqual(sender.seen, ["a", "b"])
     }
 
+    private func decision(_ id: String, approval: String, _ decision: ApprovalDecision, heldAt: Date = t0) -> OutboxItem {
+        OutboxItem(
+            id: id,
+            command: .decide(approvalID: approval, threadID: "T-1", decision: decision, requestedAt: heldAt),
+            createdAt: t0
+        )
+    }
+
+    private func enqueueDecision(_ item: OutboxItem, into outbox: Outbox) async {
+        await outbox.enqueue(item) { Outbox.supersedes(item.command, $0.command) }
+    }
+
     func testChangingYourMindSendsOneDecisionNotTwo() async {
         let outbox = Outbox(now: { t0 })
-        await outbox.enqueueDecision(id: "d1", approvalID: "call-1", threadID: "T-1", decision: .approve)
-        await outbox.enqueueDecision(id: "d2", approvalID: "call-1", threadID: "T-1", decision: .reject)
+        await enqueueDecision(decision("d1", approval: "call-1", .approve), into: outbox)
+        await enqueueDecision(decision("d2", approval: "call-1", .reject), into: outbox)
 
         let pending = await outbox.pending
         XCTAssertEqual(pending.count, 1)
-        guard case let .decide(_, _, decision) = pending[0].command else {
+        guard case let .decide(_, _, decision, _) = pending[0].command else {
             return XCTFail("expected a decision")
         }
         XCTAssertEqual(decision, .reject)
@@ -123,8 +135,8 @@ final class OutboxTests: XCTestCase {
 
     func testDecisionsForDifferentApprovalsCoexist() async {
         let outbox = Outbox(now: { t0 })
-        await outbox.enqueueDecision(id: "d1", approvalID: "call-1", threadID: "T-1", decision: .approve)
-        await outbox.enqueueDecision(id: "d2", approvalID: "call-2", threadID: "T-1", decision: .approve)
+        await enqueueDecision(decision("d1", approval: "call-1", .approve), into: outbox)
+        await enqueueDecision(decision("d2", approval: "call-2", .approve), into: outbox)
 
         let count = await outbox.count
         XCTAssertEqual(count, 2)
@@ -135,7 +147,7 @@ final class OutboxTests: XCTestCase {
         // some later tool call the user never saw.
         let clock = Clock(t0)
         let outbox = Outbox(now: { clock.now })
-        await outbox.enqueueDecision(id: "d1", approvalID: "call-1", threadID: "T-1", decision: .approve)
+        await enqueueDecision(decision("d1", approval: "call-1", .approve), into: outbox)
 
         clock.now = t0.addingTimeInterval(Outbox.decisionTTL + 1)
 
@@ -159,6 +171,113 @@ final class OutboxTests: XCTestCase {
         let sender = Sender()
         let result = await outbox.flush { try sender.send($0) }
         XCTAssertEqual(result.delivered, ["a"])
+    }
+
+    func testTheLatestArmLevelReplacesAQueuedOne() async {
+        let outbox = Outbox(now: { t0 })
+        let all = OutboxItem(id: "a1", command: .arm(threadID: "T-1", level: .all), createdAt: t0)
+        let off = OutboxItem(id: "a2", command: .arm(threadID: "T-1", level: .off), createdAt: t0)
+        let other = OutboxItem(id: "a3", command: .arm(threadID: "T-2", level: .risky), createdAt: t0)
+        await outbox.enqueue(all) { Outbox.supersedes(all.command, $0.command) }
+        await outbox.enqueue(other) { Outbox.supersedes(other.command, $0.command) }
+        await outbox.enqueue(off) { Outbox.supersedes(off.command, $0.command) }
+
+        let pending = await outbox.pending
+        // T-1's "all" is gone; T-2's level is untouched; "off" is newest.
+        XCTAssertEqual(pending.map(\.id), ["a3", "a2"])
+    }
+
+    func testBeingOfflineDoesNotUseUpAnItemsAttempts() async {
+        // Three prompts in airplane mode, then many wrist raises before the
+        // Wi-Fi is back: each raise is a flush, and each must leave the queue
+        // exactly as it was.
+        let outbox = Outbox(now: { t0 })
+        await outbox.enqueue(prompt("a", "one"))
+        await outbox.enqueue(prompt("b", "two"))
+        await outbox.enqueue(prompt("c", "three"))
+
+        for _ in 0..<(Outbox.maxAttempts * 3) {
+            _ = await outbox.flush { _ in throw AmpError.transport("offline") }
+        }
+        let attempts = await outbox.pending.map(\.attempts)
+        XCTAssertEqual(attempts, [0, 0, 0])
+
+        let sender = Sender()
+        let result = await outbox.flush { try sender.send($0) }
+        XCTAssertEqual(result.delivered, ["a", "b", "c"])
+    }
+
+    func testAServerThatSaysNoCountsButABusyOneDoesNot() async {
+        let outbox = Outbox(now: { t0 })
+        await outbox.enqueue(prompt("a", "one"))
+        _ = await outbox.flush { _ in throw AmpError.rateLimited(retryAfter: 5) }
+        _ = await outbox.flush { _ in throw AmpError.server(status: 503, message: nil) }
+        var attempts = await outbox.pending.map(\.attempts)
+        XCTAssertEqual(attempts, [0])
+
+        _ = await outbox.flush { _ in throw AmpError.server(status: 400, message: "bad") }
+        _ = await outbox.flush { _ in throw AmpError.unauthorized }
+        attempts = await outbox.pending.map(\.attempts)
+        XCTAssertEqual(attempts, [2])
+    }
+
+    func testTwoOverlappingFlushesSendEachItemOnceInOrder() async {
+        // The retry timer fires while a wrist-raise flush is mid-send. Both
+        // pass over the same queue; a re-entrant loop would send "a" twice
+        // and then remove "b" without sending it.
+        let outbox = Outbox(now: { t0 })
+        await outbox.enqueue(prompt("a", "one"))
+        await outbox.enqueue(prompt("b", "two"))
+        await outbox.enqueue(prompt("c", "three"))
+
+        let gate = Gate()
+        gate.close()
+        let log = Sender()
+        let send: @Sendable (OutboxItem) async throws -> Void = { item in
+            await gate.pass()
+            try log.send(item)
+        }
+        let first = Task { await outbox.flush(send) }
+        await gate.waitUntilBlocked()
+        let second = Task { await outbox.flush(send) }
+        // Let the second flush line up behind the first before releasing it.
+        try? await Task.sleep(for: .milliseconds(50))
+        gate.open()
+        let results = await (first.value, second.value)
+
+        XCTAssertEqual(log.seen, ["a", "b", "c"])
+        XCTAssertEqual(results.0.delivered, ["a", "b", "c"])
+        XCTAssertEqual(results.1.delivered, [])
+        let remaining = await outbox.count
+        XCTAssertEqual(remaining, 0)
+    }
+
+    func testAMindChangedWhileTheOldDecisionIsInFlightStillGetsSent() async {
+        // Approve is on the wire; the user taps Reject before the reply comes
+        // back. The reject replaces the approve in the queue. When the approve
+        // send returns, the drain must remove *that* item, not whatever is now
+        // first — which is the reject the user still wants delivered.
+        let outbox = Outbox(now: { t0 })
+        await enqueueDecision(decision("d1", approval: "call-1", .approve), into: outbox)
+
+        let gate = Gate()
+        gate.close()
+        let log = Sender()
+        let send: @Sendable (OutboxItem) async throws -> Void = { item in
+            await gate.pass()
+            try log.send(item)
+        }
+        let first = Task { await outbox.flush(send) }
+        await gate.waitUntilBlocked()
+        await enqueueDecision(decision("d2", approval: "call-1", .reject), into: outbox)
+        gate.open()
+        let result = await first.value
+
+        // The same pass keeps going and picks up the reject; nothing is lost.
+        XCTAssertEqual(log.seen, ["d1", "d2"])
+        XCTAssertEqual(result.delivered, ["d1", "d2"])
+        let remaining = await outbox.count
+        XCTAssertEqual(remaining, 0)
     }
 
     func testAPoisonItemIsDroppedAndDoesNotBlockTheQueue() async {
@@ -202,5 +321,27 @@ final class OutboxTests: XCTestCase {
         _ = await second.flush { try sender.send($0) }
         let third = await Outbox(fileURL: file, now: { t0 }).count
         XCTAssertEqual(third, 0)
+    }
+
+    func testTheFileForgetsAnItemTheMomentItIsDelivered() async {
+        // A kill between two accepted sends must not re-send the first on
+        // the next launch, so the file is written after every delivery,
+        // not once at the end of the pass.
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("outbox-\(UUID().uuidString)")
+        let file = dir.appendingPathComponent("queue.json")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let outbox = Outbox(fileURL: file, now: { t0 })
+        await outbox.enqueue(prompt("a", "one"))
+        await outbox.enqueue(prompt("b", "two"))
+
+        _ = await outbox.flush { item in
+            if item.id == "b" {
+                // "a" was accepted; the app dies before "b" goes out.
+                let onDisk = await Outbox(fileURL: file, now: { t0 }).pending.map(\.id)
+                XCTAssertEqual(onDisk, ["b"])
+                throw AmpError.transport("killed")
+            }
+        }
     }
 }

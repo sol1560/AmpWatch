@@ -19,6 +19,12 @@ export interface ApprovalSummary {
 	toolName: string
 	input: string
 	inputIsComplete: boolean
+	/**
+	 * Unix milliseconds when the thread's instance held the call. The watch
+	 * counts the decision window from this, so the clock is the bridge's,
+	 * not the receiver's and not the wrist's.
+	 */
+	requestedAt: number
 }
 
 export type WatchCommand =
@@ -40,15 +46,23 @@ export type WatchCommand =
 			summary: string | null
 			/** Present only with outcome `awaiting-approval`. */
 			approval: ApprovalSummary | null
+			/**
+			 * Where the receiver forwards this thread's `arm` and `decide`.
+			 * Carried on every announcement so a receiver that restarted
+			 * learns the link again without a separate message. The URL is
+			 * a credential; it only ever travels inside Amp.
+			 */
+			approvalURL: string | null
 	  }
-	/** The watch answers a held tool call. Forwarded to the thread's own webhook. */
-	| { type: 'decide'; threadID: string; approvalID: string; decision: Decision }
-	/** The watch chooses which of a thread's tool calls are held. Forwarded likewise. */
-	| { type: 'arm'; threadID: string; level: ArmLevel }
 	/**
-	 * A thread's plugin instance tells the receiver where to forward `decide`
-	 * and `arm`. The URL is a credential; it only ever travels inside Amp.
+	 * The watch answers a held tool call. Forwarded to the thread's own
+	 * webhook. `commandID` is the watch's idempotency key; the forwarded copy
+	 * gets a fresh event ID, so it is what the thread's instance dedupes on.
 	 */
+	| { type: 'decide'; threadID: string; approvalID: string; decision: Decision; commandID: string | null }
+	/** The watch chooses which of a thread's tool calls are held. Forwarded likewise. */
+	| { type: 'arm'; threadID: string; level: ArmLevel; commandID: string | null }
+	/** A thread's plugin instance tells the receiver where to forward `decide` and `arm`. */
 	| { type: 'link'; threadID: string; approvalURL: string }
 
 export type ParseResult = { ok: true; command: WatchCommand } | { ok: false; reason: string }
@@ -125,6 +139,7 @@ export function parseCommand(body: Uint8Array | string | unknown): ParseResult {
 					title: optionalText(fields.title),
 					summary: optionalText(fields.summary),
 					approval: outcome === 'awaiting-approval' ? approval : null,
+					approvalURL: readApprovalURL(fields.approvalURL),
 				},
 			}
 		}
@@ -141,7 +156,13 @@ export function parseCommand(body: Uint8Array | string | unknown): ParseResult {
 			}
 			return {
 				ok: true,
-				command: { type: 'decide', threadID: threadID.value, approvalID: approvalID.trim(), decision: decision as Decision },
+				command: {
+					type: 'decide',
+					threadID: threadID.value,
+					approvalID: approvalID.trim(),
+					decision: decision as Decision,
+					commandID: optionalText(fields.commandID),
+				},
 			}
 		}
 		case 'arm': {
@@ -151,15 +172,16 @@ export function parseCommand(body: Uint8Array | string | unknown): ParseResult {
 			if (!(ARM_LEVELS as readonly unknown[]).includes(level)) {
 				return { ok: false, reason: `unknown arm level ${String(level)}` }
 			}
-			return { ok: true, command: { type: 'arm', threadID: threadID.value, level: level as ArmLevel } }
+			return {
+				ok: true,
+				command: { type: 'arm', threadID: threadID.value, level: level as ArmLevel, commandID: optionalText(fields.commandID) },
+			}
 		}
 		case 'link': {
 			const threadID = readThreadID(fields)
 			if (!threadID.ok) return threadID
-			const approvalURL = fields.approvalURL
-			if (typeof approvalURL !== 'string' || !approvalURL.startsWith('https://')) {
-				return { ok: false, reason: 'approvalURL missing or not https' }
-			}
+			const approvalURL = readApprovalURL(fields.approvalURL)
+			if (approvalURL === null) return { ok: false, reason: 'approvalURL missing or not https' }
 			return { ok: true, command: { type: 'link', threadID: threadID.value, approvalURL } }
 		}
 		default:
@@ -173,12 +195,22 @@ function readApproval(value: unknown): ApprovalSummary | null {
 	if (typeof value !== 'object' || value === null) return null
 	const fields = value as Record<string, unknown>
 	if (typeof fields.id !== 'string' || typeof fields.toolName !== 'string' || typeof fields.input !== 'string') return null
+	// The sender always writes the flag. A missing one is not "complete"; it
+	// is a body this code did not build, and guessing would let a cut command
+	// reach the Approve button.
+	if (typeof fields.inputIsComplete !== 'boolean') return null
+	if (typeof fields.requestedAt !== 'number' || !Number.isFinite(fields.requestedAt) || fields.requestedAt <= 0) return null
 	return {
 		id: fields.id,
 		toolName: fields.toolName,
 		input: fields.input,
-		inputIsComplete: fields.inputIsComplete !== false,
+		inputIsComplete: fields.inputIsComplete,
+		requestedAt: fields.requestedAt,
 	}
+}
+
+function readApprovalURL(value: unknown): string | null {
+	return typeof value === 'string' && value.startsWith('https://') ? value : null
 }
 
 function optionalText(value: unknown): string | null {

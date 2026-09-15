@@ -8,7 +8,8 @@
 | M3 pushes | done | run 34940416257 green; detail (Stop under header) and new-thread (Mode picker row) inspected |
 | M4 approvals | done | run 34942528647 green; approval / approval-destructive / approval-deferred inspected; bridge round trip (approve, reject, timeout) verified in this orb |
 | M5 offline | done | run 34945306951: all screens rendered, 20/21 UI tests; the settings scroll test was fixed in 12992af and re-verified with M6 |
-| M6 polish | in progress | AmpKit 91 green; run 34946779972 pending |
+| M6 polish | done | run 34951796024 green, all 22 UI tests; montages in .amp/in/artifacts/ci-m6 |
+| Final review | in progress | AmpKit 103 green, plugin 51 green; CI run pending |
 
 ## Log
 
@@ -23,3 +24,4 @@
 - 2026-09-15 M4 done (run 34942528647). Amp's own tool.call ceiling still being probed by thread B.
 - 2026-09-15 Thread B: tool.call handler held 2/5/10/20 min, all fine; no ceiling. Timeout raised to 10 min both sides. M5 pushed (c241b49).
 - 2026-09-15 M5 run 34945306951: over-cap badge on its own line confirmed. M6 pushed (d26cf8f): widgets target, glance file, always-on accent, VoiceOver.
+- 2026-09-15 M6 done (run 34951796024, 22/22 UI tests). Final adversarial review (oracle, 16 findings) fixed in one batch: outbox reentrancy/livelock, retryable errors not counted, approvals expire by bridge clock, banner approve only when whole command fits, commandID dedupe, APNs byte-clipping, announce failure rejects the call.

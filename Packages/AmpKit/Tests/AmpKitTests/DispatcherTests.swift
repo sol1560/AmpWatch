@@ -77,12 +77,15 @@ final class DispatcherTests: XCTestCase {
         let clock = Clock(t0)
         let sink = SwitchableSink(offline: true)
         let dispatcher = Dispatcher(outbox: Outbox(now: { clock.now }), sink: sink)
-        let decide = WatchCommand.decide(approvalID: "TU-1", threadID: "T-1", decision: .approve)
+        // Held by the bridge two minutes before the tap.
+        let held = t0.addingTimeInterval(-120)
+        let decide = WatchCommand.decide(approvalID: "TU-1", threadID: "T-1", decision: .approve, requestedAt: held)
         let queued = await dispatcher.submit(decide, id: "d", at: t0)
         XCTAssertEqual(queued, .queued(behind: 0))
 
-        // Just past the bridge's own timeout: the held call is already gone.
-        clock.now = t0.addingTimeInterval(Outbox.decisionTTL + 1)
+        // Just past the bridge's own timeout, counted from when it held the
+        // call — not from the tap, which was two minutes later.
+        clock.now = held.addingTimeInterval(Outbox.decisionTTL + 1)
         sink.isOffline = false
         let result = await dispatcher.flush()
 
@@ -90,6 +93,29 @@ final class DispatcherTests: XCTestCase {
         XCTAssertEqual(result.dropped.map(\.id), ["d"])
         XCTAssertEqual(result.dropped.first?.reason, .expired)
         XCTAssertTrue(sink.sent.isEmpty, "an approve delivered after the timeout could land on a later call")
+    }
+
+    func testASubmitDuringAnotherFlushStillReportsDeliveredNotQueued() async {
+        // A retry timer is mid-flush when the user taps Send on the very item
+        // it is sending (a stale UI retry). The tap's own pass finds nothing
+        // left; it must not tell the user "saved for later".
+        let gate = Gate()
+        let sink = GatedSink(gate: gate)
+        let dispatcher = Dispatcher(outbox: Outbox(now: { t0 }), sink: sink)
+        await dispatcher.outbox.enqueue(OutboxItem(id: "tap", command: .cancel(threadID: "T-2"), createdAt: t0))
+
+        gate.close()
+        let background = Task { await dispatcher.flush() }
+        await gate.waitUntilBlocked()
+        let tap = Task { await dispatcher.submit(.cancel(threadID: "T-2"), id: "tap", at: t0) }
+        // Give the tap time to enqueue and line up behind the running pass.
+        try? await Task.sleep(for: .milliseconds(50))
+        gate.open()
+        _ = await background.value
+
+        let outcome = await tap.value
+        XCTAssertEqual(outcome, .delivered)
+        XCTAssertEqual(sink.sent.map(\.key), ["tap"])
     }
 
     func testDecisionTTLMatchesTheBridgeTimeout() {
@@ -107,5 +133,40 @@ private final class Clock: @unchecked Sendable {
     var now: Date {
         get { lock.withLock { value } }
         set { lock.withLock { value = newValue } }
+    }
+}
+
+
+/// Lets a test hold a send open until it says otherwise.
+final class Gate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var opened = true
+    private var blocked = false
+
+    func close() { lock.withLock { opened = false; blocked = false } }
+    func open() { lock.withLock { opened = true } }
+
+    func waitUntilBlocked() async {
+        while !lock.withLock({ blocked }) { try? await Task.sleep(for: .milliseconds(5)) }
+    }
+
+    func pass() async {
+        lock.withLock { blocked = true }
+        while !lock.withLock({ opened }) { try? await Task.sleep(for: .milliseconds(5)) }
+    }
+}
+
+private final class GatedSink: AmpPromptSink, @unchecked Sendable {
+    private let lock = NSLock()
+    private var log: [(command: WatchCommand, key: String?)] = []
+    private let gate: Gate
+
+    init(gate: Gate) { self.gate = gate }
+
+    var sent: [(command: WatchCommand, key: String?)] { lock.withLock { log } }
+
+    func send(_ command: WatchCommand, idempotencyKey: String?) async throws {
+        await gate.pass()
+        lock.withLock { log.append((command, idempotencyKey)) }
     }
 }

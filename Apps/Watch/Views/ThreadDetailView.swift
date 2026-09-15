@@ -25,9 +25,10 @@ final class ThreadDetailModel {
 
     func arm(_ level: ArmLevel, threadID: String, using environment: AmpEnvironment) async {
         armStatus = .sending
-        // Only the latest level matters, so a fixed id per thread replaces a
-        // queued earlier pick instead of sending both.
-        guard let outcome = await environment.deliver(.arm(threadID: threadID, level: level), id: "arm-\(threadID)") else {
+        // Only the latest level matters: the outbox drops a queued earlier
+        // pick for the same thread (`Outbox.supersedes`). Each pick keeps its
+        // own id, so a retry of the old one cannot be mistaken for the new.
+        guard let outcome = await environment.deliver(.arm(threadID: threadID, level: level)) else {
             armStatus = .failed("No bridge configured")
             return
         }

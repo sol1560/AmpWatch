@@ -81,7 +81,8 @@ public enum Fixtures {
     ]
 
     /// Held calls for the approval screenshots: one to decide, one to warn
-    /// about, one the watch must refuse to decide.
+    /// about, one the watch must refuse to decide, one the bridge has
+    /// already given up on.
     public static func approvals(now: Date = referenceDate) -> [PendingApproval] {
         let threadID = threads(now: now)[0].id
         return [
@@ -106,6 +107,13 @@ public enum Fixtures {
                 input: "/repo $ python3 - <<'EOF'\nimport json, pathlib\nfor path in pathlib.Path('Sources').rglob('*.swift'):\n    text = path.read_text()\n    if 'Date()' in text:\n        print(path)\n",
                 requestedAt: now.addingTimeInterval(-8),
                 inputIsComplete: false
+            ),
+            PendingApproval(
+                id: "TU-04fixturelate",
+                threadID: threadID,
+                toolName: "shell_command",
+                input: "/repo $ swift build",
+                requestedAt: now.addingTimeInterval(-(PendingApproval.decisionWindow + 65))
             ),
         ]
     }

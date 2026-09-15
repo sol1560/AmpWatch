@@ -109,7 +109,7 @@ struct GlanceView: View {
         guard let glance, !stale else { return "Open to refresh" }
         switch kind {
         case .awaiting:
-            return glance.headline ?? "Nothing running"
+            return glance.headline ?? "Nothing moving"
         case .spend:
             return glance.spentTodayThreads == 1 ? "1 thread" : "\(glance.spentTodayThreads) threads"
         }

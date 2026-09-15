@@ -13,8 +13,8 @@
  *   { "type": "cancel", "threadID": "T-…" }
  *   { "type": "create", "prompt": "…", "mode"?: "low"|"medium"|"high"|"ultra" }
  *   { "type": "register", "deviceToken": "<64 hex>", "environment"?: "sandbox"|"production" }
- *   { "type": "arm", "threadID": "T-…", "level": "off"|"risky"|"all" }
- *   { "type": "decide", "threadID": "T-…", "approvalID": "toolu_…", "decision": "approve"|"reject"|"defer" }
+ *   { "type": "arm", "threadID": "T-…", "level": "off"|"risky"|"all", "commandID"?: "…" }
+ *   { "type": "decide", "threadID": "T-…", "approvalID": "toolu_…", "decision": "approve"|"reject"|"defer", "commandID"?: "…" }
  *
  * and every instance POSTs its own thread's turn outcomes to the same URL:
  *
@@ -26,11 +26,12 @@
  *
  * Approvals need the *thread's own* instance, because only it sits in that
  * thread's `tool.call` handler. Each instance therefore also registers a
- * per-thread key (`approve-<threadID>`) and tells the shared receiver its URL
- * with a `link` command at the start of every turn; the receiver forwards
- * `arm` and `decide` there. Threads are unarmed by default: the bridge holds
- * nothing until the watch arms that thread. See `approvals.ts` for what is
- * held at each level.
+ * per-thread key (`approve-<threadID>`) and tells the shared receiver its URL:
+ * once with a `link` command when the thread becomes active, and again on
+ * every announcement, so a receiver that restarted relearns it from the next
+ * turn's own report. The receiver forwards `arm` and `decide` there. Threads
+ * are unarmed by default: the bridge holds nothing until the watch arms that
+ * thread. See `approvals.ts` for what is held at each level.
  *
  * The *hub* — the one orb with a `.amp/ampwatch-hub` marker file, gitignored —
  * additionally writes the capability URL to `.amp/ampwatch-hub.url` (mode 600)
@@ -132,12 +133,25 @@ export default async function (amp: PluginAPI) {
 							return
 						}
 						const command = parsed.command
+						// The receiver forwarded this, so the event ID is fresh
+						// even when the watch's own retry was not. Dedupe on
+						// the watch's key as well.
+						if (command.commandID !== null && !seen.markSeen(`cmd:${command.commandID}`)) {
+							ctx.logger.log(`amp-watch: repeat ${command.type} ${command.commandID} ignored`)
+							return
+						}
+						if (command.threadID !== threadID) {
+							// This URL is one thread's. A command naming another
+							// thread reached the wrong instance or was forged.
+							ctx.logger.log(`amp-watch: ${command.type} for ${command.threadID} sent to ${threadID}'s approval webhook; ignored`)
+							return
+						}
 						if (command.type === 'arm') {
 							guard.levels.set(command.threadID, command.level)
 							ctx.logger.log(`amp-watch: ${describe(command)}`)
 							return
 						}
-						const known = guard.queue.decide(command.approvalID, command.decision)
+						const known = guard.queue.decide(command.approvalID, command.decision, command.threadID)
 						ctx.logger.log(`amp-watch: ${describe(command)}${known ? '' : ' (nothing waiting)'}`)
 					},
 				})
@@ -147,30 +161,30 @@ export default async function (amp: PluginAPI) {
 		return link
 	}
 
-	async function post(body: Record<string, unknown>): Promise<void> {
-		const response = await fetch(url, {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify(body),
-		})
-		if (!response.ok) amp.logger.log(`amp-watch: ${String(body.type)} rejected with HTTP ${response.status}`)
+	/** True when Amp accepted the event. A refusal or a dead network is logged, never thrown. */
+	async function post(body: Record<string, unknown>): Promise<boolean> {
+		try {
+			const response = await fetch(url, {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify(body),
+			})
+			if (response.ok) return true
+			amp.logger.log(`amp-watch: ${String(body.type)} rejected with HTTP ${response.status}`)
+		} catch (error) {
+			amp.logger.log(`amp-watch: ${String(body.type)} not sent: ${error instanceof Error ? error.message : String(error)}`)
+		}
+		return false
 	}
 
-	// Tell the receiver where this thread takes decisions: now, and at every
-	// turn rather than once, because the receiving instance keeps links in
-	// memory and may have restarted.
-	async function link(threadID: string): Promise<void> {
-		await post({ type: 'link', threadID, approvalURL: await approvalURL(threadID) })
-	}
+	// Tell the receiver where this thread takes decisions as soon as the
+	// thread is active, so an `arm` from the watch has somewhere to go before
+	// the first turn reports anything. Every announcement repeats the link.
 	const linked = new Set<string>()
 	amp.activeThread.subscribe((thread) => {
 		if (!thread || linked.has(thread.id)) return
 		linked.add(thread.id)
-		void link(thread.id)
-	})
-	amp.on('agent.start', async (event) => {
-		await link(event.thread.id)
-		return {}
+		void approvalURL(thread.id).then((link) => post({ type: 'link', threadID: thread.id, approvalURL: link }))
 	})
 
 	amp.on('tool.call', async (event) => {
@@ -187,14 +201,31 @@ export default async function (amp: PluginAPI) {
 			requestedAt: Date.now(),
 		}
 		const decision = guard.queue.wait(request, APPROVAL_TIMEOUT_MS)
-		await post({
+		const announced = await post({
 			type: 'announce',
 			threadID: event.thread.id,
 			outcome: 'awaiting-approval',
 			title: await amp.threads.get(event.thread.id).title.get(),
 			summary: null,
-			approval: { id: request.id, toolName: request.toolName, input: request.input, inputIsComplete: request.inputIsComplete },
+			approval: {
+				id: request.id,
+				toolName: request.toolName,
+				input: request.input,
+				inputIsComplete: request.inputIsComplete,
+				requestedAt: request.requestedAt,
+			},
+			approvalURL: await approvalURL(event.thread.id),
 		})
+		if (!announced) {
+			// Nobody will ever see this call. Holding it for ten minutes would
+			// only stall the thread; say why and let the agent carry on.
+			guard.queue.cancel(request.id)
+			amp.logger.log(`amp-watch: ${event.tool} ${request.id} not announced; rejected`)
+			return {
+				action: 'reject-and-continue',
+				message: 'This call needs approval from the watch, but the watch could not be reached. Do not retry it; say what is blocked and wait.',
+			}
+		}
 		const outcome = await decision
 		amp.logger.log(`amp-watch: ${event.tool} ${request.id} ${outcome}`)
 		switch (outcome) {
@@ -232,6 +263,7 @@ export default async function (amp: PluginAPI) {
 			outcome,
 			title: await amp.threads.get(event.thread.id).title.get(),
 			summary: lastAssistantLine(event.messages),
+			approvalURL: await approvalURL(event.thread.id),
 		})
 	})
 }
@@ -256,6 +288,7 @@ async function apply(amp: PluginAPI, command: WatchCommand, receiver: Receiver):
 			registrations.set(command.deviceToken, { environment: command.environment })
 			return
 		case 'announce': {
+			if (command.approvalURL) approvalLinks.set(command.threadID, command.approvalURL)
 			const event = pushEvent(command)
 			if (!event) return
 			for (const [deviceToken, registration] of registrations) {
@@ -274,12 +307,14 @@ async function apply(amp: PluginAPI, command: WatchCommand, receiver: Receiver):
 				amp.logger.log(`amp-watch: no approval link for ${command.threadID}; has it started a turn since the receiver restarted?`)
 				return
 			}
-			const response = await fetch(target, {
-				method: 'POST',
-				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify(command),
-			})
-			if (!response.ok) amp.logger.log(`amp-watch: forwarding ${command.type} failed with HTTP ${response.status}`)
+			const headers: Record<string, string> = { 'content-type': 'application/json' }
+			if (command.commandID) headers['idempotency-key'] = command.commandID
+			try {
+				const response = await fetch(target, { method: 'POST', headers, body: JSON.stringify(command) })
+				if (!response.ok) amp.logger.log(`amp-watch: forwarding ${command.type} failed with HTTP ${response.status}`)
+			} catch (error) {
+				amp.logger.log(`amp-watch: forwarding ${command.type} failed: ${error instanceof Error ? error.message : String(error)}`)
+			}
 			return
 		}
 	}
@@ -304,7 +339,7 @@ function pushEvent(command: Extract<WatchCommand, { type: 'announce' }>): PushEv
 				toolName: command.approval.toolName,
 				summary: command.approval.input,
 				inputIsComplete: command.approval.inputIsComplete,
-				requestedAt: Date.now(),
+				requestedAt: command.approval.requestedAt,
 			}
 	}
 }
@@ -347,6 +382,7 @@ export class Pusher {
 			providerToken: this.token,
 			deviceToken,
 			event,
+			now: Date.now(),
 		})
 
 		// A curl config file keeps the bearer token out of argv and out of any
