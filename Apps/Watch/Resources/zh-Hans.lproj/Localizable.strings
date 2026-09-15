@@ -121,3 +121,4 @@
 "Voice input unavailable" = "语音输入暂不可用";
 "Tap the prompt field to use system dictation." = "请点输入框使用系统听写。";
 "OK" = "好";
+"%@, %@ ago: %@" = "%@，%@前：%@";

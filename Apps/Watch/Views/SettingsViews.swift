@@ -96,7 +96,7 @@ struct SettingsView: View {
 
                 Picker(selection: $preferences.budgetCapUSD) {
                     ForEach(Self.capChoices, id: \.self) { cap in
-                        Text(cap.map { Money.compact(usd: $0) } ?? "off").tag(cap)
+                        Text(cap.map { Money.compact(usd: $0) } ?? WatchStrings.text("off")).tag(cap)
                     }
                 } label: {
                     Label("Flag at", systemImage: "dollarsign.circle")

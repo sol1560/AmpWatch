@@ -121,3 +121,4 @@
 "Voice input unavailable" = "Voice input unavailable";
 "Tap the prompt field to use system dictation." = "Tap the prompt field to use system dictation.";
 "OK" = "OK";
+"%@, %@ ago: %@" = "%@, %@ ago: %@";

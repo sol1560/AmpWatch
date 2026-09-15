@@ -278,7 +278,9 @@ struct MessageView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(speaker), \(RelativeTime.short(from: message.createdAt, to: now)) ago: \(message.text ?? "tool activity")")
+        .accessibilityLabel(WatchStrings.format("%@, %@ ago: %@", speaker,
+            RelativeTime.short(from: message.createdAt, to: now),
+            message.text ?? WatchStrings.text("tool activity")))
         .accessibilityIdentifier("message")
     }
 
