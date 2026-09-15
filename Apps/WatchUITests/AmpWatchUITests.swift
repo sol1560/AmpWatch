@@ -60,4 +60,28 @@ final class AmpWatchUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["usage"].waitForExistence(timeout: 20))
         XCTAssertTrue(app.staticTexts["total-cost"].exists)
     }
+
+    func testSetupCannotContinueWithoutAToken() {
+        let app = launch(screen: "setup")
+        XCTAssertTrue(app.descendants(matching: .any)["setup"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["continue-button"].isEnabled)
+    }
+
+    func testSettingsMasksSecrets() {
+        let app = launch(screen: "settings")
+        XCTAssertTrue(app.descendants(matching: .any)["settings"].waitForExistence(timeout: 20))
+        // The fixture token ends in "7f3a"; a screenshot of this screen ends up
+        // in a public CI artifact, so only that suffix may be on screen.
+        let token = app.staticTexts["token-value"]
+        XCTAssertTrue(token.waitForExistence(timeout: 5))
+        XCTAssertEqual(token.label, "…7f3a")
+        XCTAssertEqual(app.staticTexts["webhook-value"].label, "hooks.example.test")
+        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "fixture-token")).firstMatch.exists)
+    }
+
+    func testDetailShowsFullTitleInBodyNotOnlyInBar() {
+        let app = launch(screen: "detail")
+        XCTAssertTrue(app.descendants(matching: .any)["thread-detail"].waitForExistence(timeout: 20))
+        XCTAssertEqual(app.staticTexts["thread-title"].label, "Fix the flaky watchOS simulator boot in CI")
+    }
 }

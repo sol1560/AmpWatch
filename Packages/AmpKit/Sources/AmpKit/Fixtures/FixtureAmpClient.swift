@@ -72,6 +72,14 @@ public enum Fixtures {
         ]
     }
 
+    /// Obviously fake credentials for the settings screenshot. The UI masks
+    /// them anyway; these must never resemble a real token format closely
+    /// enough to trip a secret scanner.
+    public static let secrets: [SecretKey: String] = [
+        .accessToken: "fixture-token-ends-in-7f3a",
+        .webhookURL: "https://hooks.example.test/w/fixture",
+    ]
+
     public static func usage() -> ThreadUsage {
         ThreadUsage(
             threadID: "T-01a0a325-7a11-73eb-a5a7-46c40b37076d",

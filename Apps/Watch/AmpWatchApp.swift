@@ -10,35 +10,55 @@ struct AmpWatchApp: App {
                 // captures on the watchOS simulator.
                 screen.view.environment(\.amp, screen.environment)
             } else {
-                RootView()
-                    .environment(\.amp, .live())
+                RootView(secrets: KeychainSecretStore(service: "com.soll.ampwatch"))
             }
         }
     }
 }
 
+/// Owns the session. Everything below reads the resulting `AmpEnvironment`;
+/// when a credential changes, `reload` rebuilds the session and SwiftUI
+/// re-renders the tree with a fresh client.
 struct RootView: View {
+    let secrets: any SecretStore
+    @State private var session: AmpSession
+
+    init(secrets: any SecretStore) {
+        self.secrets = secrets
+        _session = State(initialValue: Self.load(secrets))
+    }
+
     var body: some View {
         NavigationStack {
-            ThreadListView()
+            switch session {
+            case .needsSetup:
+                SetupView()
+            case .ready:
+                ThreadListView()
+            }
         }
+        .environment(\.amp, environment)
         .tint(AmpTheme.ember)
     }
-}
 
-extension AmpEnvironment {
-    /// The real app wiring.
-    ///
-    /// Still fixture-backed: credential storage and the live `AmpAPIClient` /
-    /// `WebhookPromptSink` wiring land in the next milestone. Everything above
-    /// this line already talks to `AmpClient`, so only this function changes.
-    static func live() -> AmpEnvironment {
-        let fixture = FixtureAmpClient(behavior: .ok, now: Fixtures.referenceDate)
+    private var environment: AmpEnvironment {
+        var client: any AmpClient = AmpSession.UnconfiguredClient()
+        var sink: (any AmpPromptSink)?
+        if case let .ready(readyClient, readySink) = session {
+            client = readyClient
+            sink = readySink
+        }
         return AmpEnvironment(
-            client: fixture,
-            promptSink: fixture,
-            now: { Fixtures.referenceDate }
+            client: client,
+            promptSink: sink,
+            secrets: secrets,
+            now: { Date() },
+            reload: { session = Self.load(secrets) }
         )
+    }
+
+    private static func load(_ secrets: any SecretStore) -> AmpSession {
+        AmpSession.load(from: secrets, transport: URLSessionTransport())
     }
 }
 
@@ -54,6 +74,8 @@ enum ScreenshotScene: String, CaseIterable {
     case detail
     case compose
     case usage
+    case setup
+    case settings
 
     static let launchArgument = "-ampwatch-screen"
 
@@ -69,6 +91,7 @@ enum ScreenshotScene: String, CaseIterable {
         switch self {
         case .threadsEmpty: .fixture(behavior: .empty)
         case .threadsError: .fixture(behavior: .failing(.unauthorized))
+        case .setup: .fixture(secrets: InMemorySecretStore())
         default: .fixture()
         }
     }
@@ -86,6 +109,10 @@ enum ScreenshotScene: String, CaseIterable {
             NavigationStack { ComposeView(thread: thread) }.tint(AmpTheme.ember)
         case .usage:
             NavigationStack { UsageView(thread: thread) }.tint(AmpTheme.ember)
+        case .setup:
+            NavigationStack { SetupView() }.tint(AmpTheme.ember)
+        case .settings:
+            NavigationStack { SettingsView() }.tint(AmpTheme.ember)
         }
     }
 }

@@ -36,7 +36,10 @@ struct ThreadDetailView: View {
             }
         }
         .containerBackground(AmpTheme.canvas.gradient, for: .navigation)
-        .navigationTitle(thread.displayTitle)
+        // Titles are sentences; the watch nav bar only fits a few words and
+        // scrolls anything longer. Keep the bar short and put the full title
+        // in the body where it can wrap.
+        .navigationTitle("Thread")
         .navigationBarTitleDisplayMode(.inline)
         .task { await model.load(threadID: thread.id, from: amp) }
     }
@@ -44,6 +47,10 @@ struct ThreadDetailView: View {
     private func transcript(_ messages: [ThreadMessage]) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
+                Text(thread.displayTitle)
+                    .font(AmpTheme.display(17))
+                    .foregroundStyle(AmpTheme.parchment)
+                    .accessibilityIdentifier("thread-title")
                 header
 
                 ForEach(messages) { message in

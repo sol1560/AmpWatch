@@ -65,7 +65,7 @@ struct ErrorView: View {
     private var detail: String {
         switch error {
         case .unauthorized:
-            "The API token was rejected. Re-pair from the phone app."
+            "The API token was rejected. Open Settings and enter a new one."
         case .forbidden:
             "This token cannot read thread contents. Add the threads.contents:view scope."
         case .notFound:

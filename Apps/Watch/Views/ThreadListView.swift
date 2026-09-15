@@ -38,6 +38,17 @@ struct ThreadListView: View {
         }
         .containerBackground(AmpTheme.canvas.gradient, for: .navigation)
         .navigationTitle("amp")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink {
+                    SettingsView()
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .accessibilityLabel("Settings")
+                .accessibilityIdentifier("settings-button")
+            }
+        }
         .task { await model.load(from: amp) }
     }
 
