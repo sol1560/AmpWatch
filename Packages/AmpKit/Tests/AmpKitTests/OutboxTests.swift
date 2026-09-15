@@ -180,4 +180,27 @@ final class OutboxTests: XCTestCase {
         XCTAssertEqual(sender.seen, ["good"])
         XCTAssertEqual(result.remaining, 0)
     }
+
+    func testQueueSurvivesARestartFromTheSameFile() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("outbox-\(UUID().uuidString)")
+        let file = dir.appendingPathComponent("queue.json")
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let first = Outbox(fileURL: file, now: { t0 })
+        await first.enqueue(prompt("a", "dictated in a stairwell"))
+        await first.enqueue(prompt("b", "then another"))
+
+        // A new instance is what a killed-and-relaunched app gets.
+        let second = Outbox(fileURL: file, now: { t0 })
+        let pending = await second.pending
+        XCTAssertEqual(pending.map(\.id), ["a", "b"])
+        XCTAssertEqual(pending.first?.command, .prompt(threadID: "T-1", text: "dictated in a stairwell", steer: true))
+
+        // Delivery on the new instance must clear the file too, or the next
+        // launch re-sends what already went.
+        let sender = Sender()
+        _ = await second.flush { try sender.send($0) }
+        let third = await Outbox(fileURL: file, now: { t0 }).count
+        XCTAssertEqual(third, 0)
+    }
 }

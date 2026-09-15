@@ -63,11 +63,14 @@ export const HUB_URL_FILE = '.amp/ampwatch-hub.url'
 export const WEBHOOK_KEY = 'amp-watch'
 
 /**
- * How long a held call waits for the watch. Amp's own ceiling for a
- * `tool.call` handler is measured in `docs/DESIGN.md`; this stays under it so
- * the outcome is always ours (a clear rejection) and never Amp's.
+ * How long a held call waits for the watch. Amp itself lets a `tool.call`
+ * handler stay pending for at least 20 minutes (measured, see
+ * `docs/DESIGN.md` Unknown 2), so this is a product choice: long enough to
+ * finish a class exercise and glance at the wrist, short enough that a thread
+ * nobody is watching does not sit idle for an hour. The watch's
+ * `Outbox.decisionTTL` must equal this.
  */
-export const APPROVAL_TIMEOUT_MS = 4 * 60 * 1000
+export const APPROVAL_TIMEOUT_MS = 10 * 60 * 1000
 
 /** Where pushes go. Keyed by device token, so a re-register is idempotent. */
 type Registrations = Map<string, { environment: 'sandbox' | 'production' }>

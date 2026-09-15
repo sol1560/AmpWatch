@@ -141,4 +141,82 @@ final class AmpWatchUITests: XCTestCase {
         XCTAssertTrue(app.buttons["defer-button"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["approval-defer-reason"].exists)
     }
+
+    func testQueuedCommandsShowAboveTheThreadList() {
+        let app = launch(screen: "threads-queued")
+        XCTAssertTrue(app.descendants(matching: .any)["thread-list"].waitForExistence(timeout: 20))
+        let banner = app.descendants(matching: .any)["outbox-banner"]
+        XCTAssertTrue(banner.waitForExistence(timeout: 5))
+        XCTAssertTrue(banner.label.contains("2 waiting to send"), banner.label)
+        // Without anything queued there is no banner at all, not an empty one.
+        let plain = launch(screen: "threads")
+        XCTAssertTrue(plain.descendants(matching: .any)["thread-list"].waitForExistence(timeout: 20))
+        XCTAssertFalse(plain.descendants(matching: .any)["outbox-banner"].exists)
+    }
+
+    func testLiveThreadOverTheCapIsFlaggedInTheList() {
+        let app = launch(screen: "threads-over-cap")
+        XCTAssertTrue(app.descendants(matching: .any)["thread-list"].waitForExistence(timeout: 20))
+        let rows = app.descendants(matching: .any).matching(identifier: "thread-row")
+        // The first fixture thread is live and has spent $1.87 against a
+        // $1.50 cap; the second is quiet, so its cost is never fetched.
+        let flagged = rows.containing(NSPredicate(format: "label CONTAINS %@", "over cap")).firstMatch
+        XCTAssertTrue(flagged.waitForExistence(timeout: 10))
+        XCTAssertTrue(flagged.label.contains("$1.87"), flagged.label)
+        XCTAssertFalse(rows.element(boundBy: 1).label.contains("$"), rows.element(boundBy: 1).label)
+    }
+
+    func testDetailCostRowWarnsOnlyPastTheCap() {
+        let over = launch(screen: "detail-over-cap")
+        XCTAssertTrue(over.descendants(matching: .any)["thread-detail"].waitForExistence(timeout: 20))
+        let row = over.descendants(matching: .any)["cost-row"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        XCTAssertTrue(row.label.contains("over cap"), row.label)
+
+        // Same spend under the default $5 cap: a plain amount, no warning.
+        let fine = launch(screen: "detail")
+        XCTAssertTrue(fine.descendants(matching: .any)["thread-detail"].waitForExistence(timeout: 20))
+        let plain = fine.descendants(matching: .any)["cost-row"]
+        XCTAssertTrue(plain.waitForExistence(timeout: 10))
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label CONTAINS %@", "$1.87"), object: plain)
+        XCTAssertEqual(XCTWaiter().wait(for: [expectation], timeout: 10), .completed, plain.label)
+        XCTAssertFalse(plain.label.contains("cap"), plain.label)
+    }
+
+    func testComposeOffersTheSavedPhrases() {
+        let app = launch(screen: "compose")
+        XCTAssertTrue(app.descendants(matching: .any)["compose"].waitForExistence(timeout: 20))
+        let chips = app.buttons.matching(identifier: "phrase-chip")
+        XCTAssertEqual(chips.count, 6)
+        chips.element(boundBy: 1).tap()
+        // Tapping fills the field; it must not send on its own.
+        XCTAssertEqual(app.descendants(matching: .any)["prompt-field"].value as? String, "Run the tests")
+        XCTAssertFalse(app.descendants(matching: .any)["send-confirmation"].exists)
+        XCTAssertTrue(app.buttons["send-button"].isEnabled)
+    }
+
+    func testPhrasesScreenListsTheDefaultsAndRejectsABlankEntry() {
+        let app = launch(screen: "phrases")
+        XCTAssertTrue(app.descendants(matching: .any)["phrases"].waitForExistence(timeout: 20))
+        let rows = app.descendants(matching: .any).matching(identifier: "phrase-row")
+        XCTAssertTrue(rows.element(boundBy: 0).waitForExistence(timeout: 5))
+        XCTAssertEqual(rows.element(boundBy: 0).label, "Continue")
+        XCTAssertTrue(app.descendants(matching: .any)["phrase-field"].exists)
+    }
+
+    func testTemplatesScreenCannotSaveWithoutTitleAndPrompt() {
+        let app = launch(screen: "templates")
+        XCTAssertTrue(app.descendants(matching: .any)["templates"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["template-save-button"].isEnabled)
+        let rows = app.descendants(matching: .any).matching(identifier: "template-row")
+        XCTAssertTrue(rows.element(boundBy: 0).waitForExistence(timeout: 5))
+        XCTAssertTrue(rows.element(boundBy: 0).label.contains("Fix CI"))
+    }
+
+    func testNewThreadOffersATemplatePicker() {
+        let app = launch(screen: "new-thread")
+        XCTAssertTrue(app.descendants(matching: .any)["new-thread"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.descendants(matching: .any)["template-picker"].exists)
+    }
 }

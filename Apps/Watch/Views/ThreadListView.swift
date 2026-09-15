@@ -5,20 +5,41 @@ import AmpKit
 @Observable
 final class ThreadListModel {
     private(set) var state: Loadable<[ThreadSummary]> = .loading
+    /// Spend for the threads that can still be spending. Only live threads are
+    /// looked up: a quiet thread's cost cannot grow, and each lookup is one
+    /// request against a budget shared with everything else the watch does.
+    private(set) var usage: [String: ThreadUsage] = [:]
 
     func load(from environment: AmpEnvironment) async {
         do {
             let page = try await environment.client.threads(limit: 25)
             state = .loaded(page.items)
+            await loadUsage(for: page.items.filter { $0.activity(now: environment.now()) == .live }, from: environment)
         } catch {
             state = .failed(error as? AmpError ?? .transport(String(describing: error)))
         }
+    }
+
+    private func loadUsage(for threads: [ThreadSummary], from environment: AmpEnvironment) async {
+        let client = environment.client
+        let found = await withTaskGroup(of: ThreadUsage?.self) { group in
+            for thread in threads {
+                group.addTask { try? await client.usage(threadID: thread.id) }
+            }
+            var found: [String: ThreadUsage] = [:]
+            for await usage in group {
+                if let usage { found[usage.threadID] = usage }
+            }
+            return found
+        }
+        usage.merge(found) { _, new in new }
     }
 }
 
 struct ThreadListView: View {
     @Environment(\.amp) private var amp
     @State private var model = ThreadListModel()
+    @State private var budgetCap: Double?
 
     var body: some View {
         Group {
@@ -61,13 +82,23 @@ struct ThreadListView: View {
             }
         }
         .task { await model.load(from: amp) }
+        .onAppear { budgetCap = amp.preferences.load().budgetCapUSD }
     }
 
     private func list(_ threads: [ThreadSummary]) -> some View {
         List {
+            if amp.outbox.pending > 0 || amp.outbox.note != nil {
+                OutboxBanner(status: amp.outbox)
+                    .listRowBackground(Color.clear)
+            }
             ForEach(threads) { thread in
                 NavigationLink(value: thread) {
-                    ThreadRow(thread: thread, now: amp.now())
+                    ThreadRow(
+                        thread: thread,
+                        now: amp.now(),
+                        usageUSD: model.usage[thread.id]?.usage,
+                        budgetCapUSD: budgetCap
+                    )
                 }
                 .listRowBackground(Color.clear)
             }
@@ -80,9 +111,37 @@ struct ThreadListView: View {
     }
 }
 
+/// What is waiting to go out, and what never made it. Sits above the threads
+/// because "did my message send?" is the first thing a raised wrist asks.
+struct OutboxBanner: View {
+    let status: OutboxStatus
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if status.pending > 0 {
+                Label(
+                    status.pending == 1 ? "1 waiting to send" : "\(status.pending) waiting to send",
+                    systemImage: "tray.and.arrow.up"
+                )
+                .foregroundStyle(AmpTheme.ember)
+            }
+            if let note = status.note {
+                Text(note)
+                    .foregroundStyle(AmpTheme.parchmentDim)
+            }
+        }
+        .font(AmpTheme.body(12, weight: .medium))
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("outbox-banner")
+    }
+}
+
 struct ThreadRow: View {
     let thread: ThreadSummary
     let now: Date
+    var usageUSD: Double?
+    var budgetCapUSD: Double?
 
     private var activity: ThreadActivity { thread.activity(now: now) }
 
@@ -106,6 +165,10 @@ struct ThreadRow: View {
                     Text("·")
                 }
                 Text(RelativeTime.short(from: thread.updatedAt, to: now))
+                if let usageUSD {
+                    Spacer(minLength: 4)
+                    BudgetBadge(usageUSD: usageUSD, standing: BudgetStanding(usageUSD: usageUSD, capUSD: budgetCapUSD))
+                }
             }
             .font(AmpTheme.body(12))
             .foregroundStyle(AmpTheme.parchmentDim)

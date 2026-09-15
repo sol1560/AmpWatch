@@ -125,14 +125,17 @@ Not measured: what happens to ownership when the owning orb is paused or
 archived. Until it is, the hub thread stays awake during use (see cost note).
 
 **Unknown 2 — how long a `tool.call` handler may stay pending.** Not
-documented. The bridge answers on its own clock, `APPROVAL_TIMEOUT_MS` in
-`Plugin/amp-watch-bridge.ts` (4 minutes), with `reject-and-continue` and a
-message that tells the agent not to retry; that way the outcome is always the
-bridge's, never Amp's. Verified in this orb on 2026-09-15: a held
-`shell_command` with no decision came back as
-"Tool rejected by plugin: Nobody approved this from the watch within 4
-minutes", and the turn continued. A probe of Amp's own ceiling (slow handler
-at 2/5/10/20 min) is running in thread B; its result belongs here.
+documented, so measured (thread B, 2026-09-15): a `tool.call` handler that
+slept 2, 5, 10 and 20 minutes before returning `{}` succeeded every time
+(20-minute probe: start 07:27:32Z, end 07:47:32Z, tool ran). No ceiling was
+found; at least 20 minutes is safe. The bridge therefore answers on its own
+clock, `APPROVAL_TIMEOUT_MS` in `Plugin/amp-watch-bridge.ts` (10 minutes, a
+product choice), with `reject-and-continue` and a message that tells the
+agent not to retry; the outcome is always the bridge's, never Amp's.
+Verified in this orb with the earlier 4-minute value: a held `shell_command`
+with no decision came back as "Tool rejected by plugin: Nobody approved this
+from the watch within 4 minutes", and the turn continued. The watch drops a
+queued decision older than the same window (`Outbox.decisionTTL`).
 
 **Approvals as built (M4).** A thread is *unarmed* until the watch sends
 `{ "type": "arm", "level": "off" | "risky" | "all" }` for it. `risky` holds

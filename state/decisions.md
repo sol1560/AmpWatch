@@ -48,3 +48,7 @@ adversarial_each_milestone=false, adversarial_final=true, use_test_agent=true
   Plugin cwd is `.amp/plugins`. Details in docs/DESIGN.md.
 - Consequence: M3 becomes pushes (APNs), M4 becomes approvals; the watch talks
   only to the hub, which forwards decisions to per-thread approval webhooks.
+- `tool.call` ceiling (2026-09-15, thread B): handler slept 2/5/10/20 min,
+  all succeeded, no ceiling found. Approval timeout is therefore a product
+  choice; set to 10 min on both sides (`APPROVAL_TIMEOUT_MS`,
+  `Outbox.decisionTTL`). Veto-able.

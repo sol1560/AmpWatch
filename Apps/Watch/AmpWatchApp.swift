@@ -31,6 +31,11 @@ struct RootView: View {
     /// Bumped on every reload so a new sink re-registers the device token.
     @State private var generation = 0
     @State private var path = NavigationPath()
+    /// One queue for the life of the process, on disk, so a prompt dictated
+    /// with no link outlives the app being killed.
+    @State private var outbox = Outbox(fileURL: Self.outboxFile)
+    @State private var outboxStatus = OutboxStatus()
+    @Environment(\.scenePhase) private var scenePhase
 
     init(secrets: any SecretStore, push: PushRegistrar? = nil) {
         self.secrets = secrets
@@ -55,6 +60,28 @@ struct RootView: View {
         .task(id: "\(push?.deviceToken ?? "")|\(generation)") { await registerForPushes() }
         .task(id: push?.pendingCommand) { await sendPendingCommand() }
         .task(id: push?.pendingApproval) { openPendingApproval() }
+        .task(id: generation) { await retryOutbox() }
+        .onChange(of: scenePhase) { _, phase in
+            // Raising the wrist is the moment the link is most likely back.
+            if phase == .active { Task { await environment.flushOutbox() } }
+        }
+    }
+
+    /// Retries queued commands while the app is on screen. watchOS suspends
+    /// the app when the wrist drops, so this is not a background service; the
+    /// next raise resumes it (see `scenePhase` above).
+    private func retryOutbox() async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(Self.outboxRetryInterval))
+            await environment.flushOutbox()
+        }
+    }
+
+    static let outboxRetryInterval: TimeInterval = 20
+
+    private static var outboxFile: URL {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return support.appendingPathComponent("AmpWatch/outbox.json")
     }
 
     private func openPendingApproval() {
@@ -64,29 +91,32 @@ struct RootView: View {
     }
 
     private func registerForPushes() async {
-        guard let token = push?.deviceToken, case let .ready(_, sink?) = session else { return }
+        guard let token = push?.deviceToken, case .ready(_, .some(_)) = session else { return }
         try? secrets.write(token, for: .deviceToken)
         // Best effort: the bridge only learns the token this way, and the next
-        // launch tries again. Nothing to show the user if it fails.
-        try? await sink.send(.register(deviceToken: token, environment: PushRegistrar.environment), idempotencyKey: nil)
+        // launch tries again. A fixed id means an offline launch queues one
+        // registration, not one per retry.
+        _ = await environment.deliver(.register(deviceToken: token, environment: PushRegistrar.environment), id: "register")
     }
 
     private func sendPendingCommand() async {
-        guard let push, let command = push.pendingCommand, case let .ready(_, sink?) = session else { return }
+        guard let push, let command = push.pendingCommand, case .ready(_, .some(_)) = session else { return }
         push.pendingCommand = nil
-        try? await sink.send(command, idempotencyKey: nil)
+        _ = await environment.deliver(command)
     }
 
     private var environment: AmpEnvironment {
         var client: any AmpClient = AmpSession.UnconfiguredClient()
-        var sink: (any AmpPromptSink)?
+        var dispatcher: Dispatcher?
         if case let .ready(readyClient, readySink) = session {
             client = readyClient
-            sink = readySink
+            dispatcher = readySink.map { Dispatcher(outbox: outbox, sink: $0) }
         }
         return AmpEnvironment(
             client: client,
-            promptSink: sink,
+            dispatcher: dispatcher,
+            outbox: outboxStatus,
+            preferences: PreferencesStore(),
             secrets: secrets,
             now: { Date() },
             reload: {
@@ -119,6 +149,11 @@ enum ScreenshotScene: String, CaseIterable {
     case approval
     case approvalDestructive = "approval-destructive"
     case approvalDeferred = "approval-deferred"
+    case threadsQueued = "threads-queued"
+    case threadsOverCap = "threads-over-cap"
+    case detailOverCap = "detail-over-cap"
+    case phrases
+    case templates
 
     static let launchArgument = "-ampwatch-screen"
 
@@ -135,8 +170,20 @@ enum ScreenshotScene: String, CaseIterable {
         case .threadsEmpty: .fixture(behavior: .empty)
         case .threadsError: .fixture(behavior: .failing(.unauthorized))
         case .setup: .fixture(secrets: InMemorySecretStore())
+        case .threadsQueued: .fixture(queued: [
+            .prompt(threadID: Fixtures.threads()[0].id, text: "Continue", steer: true),
+            .cancel(threadID: Fixtures.threads()[1].id),
+        ])
+        // The fixture thread has spent $1.87; a $1.50 cap puts it over.
+        case .threadsOverCap, .detailOverCap: .fixture(preferences: Self.overCapPreferences)
         default: .fixture()
         }
+    }
+
+    private static var overCapPreferences: WatchPreferences {
+        var preferences = WatchPreferences.defaults
+        preferences.budgetCapUSD = 1.5
+        return preferences
     }
 
     // Views are main-actor isolated under Swift 6, so building them is too.
@@ -144,9 +191,9 @@ enum ScreenshotScene: String, CaseIterable {
     var view: some View {
         let thread = Fixtures.threads()[0]
         switch self {
-        case .threads, .threadsEmpty, .threadsError:
+        case .threads, .threadsEmpty, .threadsError, .threadsQueued, .threadsOverCap:
             NavigationStack { ThreadListView() }.tint(AmpTheme.ember)
-        case .detail:
+        case .detail, .detailOverCap:
             NavigationStack { ThreadDetailView(thread: thread) }.tint(AmpTheme.ember)
         case .compose:
             NavigationStack { ComposeView(thread: thread) }.tint(AmpTheme.ember)
@@ -164,6 +211,10 @@ enum ScreenshotScene: String, CaseIterable {
             NavigationStack { ApprovalView(approval: Fixtures.approvals()[1]) }.tint(AmpTheme.ember)
         case .approvalDeferred:
             NavigationStack { ApprovalView(approval: Fixtures.approvals()[2]) }.tint(AmpTheme.ember)
+        case .phrases:
+            NavigationStack { PhrasesView() }.tint(AmpTheme.ember)
+        case .templates:
+            NavigationStack { TemplatesView() }.tint(AmpTheme.ember)
         }
     }
 }

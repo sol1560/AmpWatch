@@ -5,31 +5,42 @@ import AmpKit
 @Observable
 final class NewThreadModel {
     enum Status: Equatable {
-        case editing, sending, sent, failed(String)
+        case editing, sending, sent, queued, failed(String)
     }
 
     var prompt = ""
     var mode: AgentMode = .medium
+    /// Title of the chosen template, or `nil` for a blank prompt.
+    var template: String?
     private(set) var status: Status = .editing
 
     var canSend: Bool {
         status != .sending && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    func apply(_ template: ThreadTemplate?) {
+        guard let template else { return }
+        prompt = template.prompt
+        mode = template.mode
+    }
+
     func send(using environment: AmpEnvironment) async {
-        guard let sink = environment.promptSink else {
+        let text = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        status = .sending
+        guard let outcome = await environment.deliver(.create(prompt: text, mode: mode)) else {
             status = .failed("No bridge configured")
             return
         }
-        status = .sending
-        do {
-            let text = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-            try await sink.send(.create(prompt: text, mode: mode), idempotencyKey: nil)
+        switch outcome {
+        case .delivered:
             prompt = ""
             status = .sent
-        } catch {
-            let amp = error as? AmpError ?? .transport(String(describing: error))
-            status = .failed(amp.watchDescription)
+        case .queued:
+            prompt = ""
+            status = .queued
+        case let .dropped(reason):
+            status = .failed(OutboxStatus.note(for: reason))
         }
     }
 }
@@ -42,10 +53,28 @@ final class NewThreadModel {
 struct NewThreadView: View {
     @Environment(\.amp) private var amp
     @State private var model = NewThreadModel()
+    @State private var templates: [ThreadTemplate] = []
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
+                // Templates first: on a watch the common case is "start the
+                // usual thing", and the field below fills in from the pick.
+                Picker(selection: $model.template) {
+                    Text("blank").tag(String?.none)
+                    ForEach(templates) { template in
+                        Text(template.title).tag(String?.some(template.title))
+                    }
+                } label: {
+                    Label("Template", systemImage: "doc.text")
+                }
+                .pickerStyle(.navigationLink)
+                .font(AmpTheme.body(13))
+                .onChange(of: model.template) { _, title in
+                    model.apply(templates.first { $0.title == title })
+                }
+                .accessibilityIdentifier("template-picker")
+
                 TextField("What should it do?", text: $model.prompt, axis: .vertical)
                     .font(AmpTheme.body(14))
                     .accessibilityIdentifier("new-thread-prompt")
@@ -82,6 +111,7 @@ struct NewThreadView: View {
         .navigationTitle("New thread")
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("new-thread")
+        .onAppear { templates = amp.preferences.load().templates }
     }
 
     @ViewBuilder
@@ -94,7 +124,11 @@ struct NewThreadView: View {
                 .font(AmpTheme.body(11))
                 .foregroundStyle(AmpTheme.parchmentDim)
         case .sent:
-            Text("queued — it will show in the list shortly")
+            Text("started — it will show in the list shortly")
+                .font(AmpTheme.body(11))
+                .foregroundStyle(AmpTheme.parchment)
+        case .queued:
+            Text("saved — starts when the watch is back online")
                 .font(AmpTheme.body(11))
                 .foregroundStyle(AmpTheme.parchment)
         case let .failed(message):

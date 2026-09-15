@@ -58,17 +58,42 @@ public actor Outbox {
 
     /// How long an approval stays meaningful.
     ///
-    /// The plugin's `tool.call` handler cannot stay pending indefinitely, so a
-    /// decision delivered long after the fact would be applied to nothing — or
-    /// worse, to a later tool call. The real ceiling is measured in M3; this is
-    /// a deliberately conservative placeholder.
+    /// The bridge rejects a held call nobody decided within
+    /// `APPROVAL_TIMEOUT_MS` (10 minutes in `Plugin/amp-watch-bridge.ts`), so a
+    /// decision older than that would land on nothing. Keep the two in step.
     public static let decisionTTL: TimeInterval = 10 * 60
 
     private var items: [OutboxItem] = []
     private let now: @Sendable () -> Date
+    /// Where the queue survives an app kill. `nil` keeps it in memory only,
+    /// which is what tests and screenshots want.
+    private let fileURL: URL?
 
-    public init(now: @escaping @Sendable () -> Date = { Date() }) {
+    public init(fileURL: URL? = nil, now: @escaping @Sendable () -> Date = { Date() }) {
         self.now = now
+        self.fileURL = fileURL
+        if let fileURL, let data = try? Data(contentsOf: fileURL) {
+            // A file this app cannot read any more (older schema, corruption)
+            // is worth less than a working queue; start empty rather than
+            // refuse to launch.
+            items = (try? JSONDecoder().decode([OutboxItem].self, from: data)) ?? []
+        }
+    }
+
+    /// Writes the queue after every change, so the on-disk copy is never
+    /// behind what the user was told is queued.
+    private func persist() {
+        guard let fileURL else { return }
+        do {
+            try FileManager.default.createDirectory(
+                at: fileURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try JSONEncoder().encode(items).write(to: fileURL, options: .atomic)
+        } catch {
+            // Losing durability is bad; crashing while the user is dictating
+            // is worse. The in-memory queue still delivers this session.
+        }
     }
 
     public var pending: [OutboxItem] { items }
@@ -85,6 +110,7 @@ public actor Outbox {
         } else {
             items.append(item)
         }
+        persist()
     }
 
     /// Replaces any queued decision for the same approval.
@@ -101,10 +127,12 @@ public actor Outbox {
             command: .decide(approvalID: approvalID, threadID: threadID, decision: decision),
             createdAt: now()
         ))
+        persist()
     }
 
     public func remove(id: String) {
         items.removeAll { $0.id == id }
+        persist()
     }
 
     /// Attempts delivery of every queued item, oldest first.
@@ -141,6 +169,7 @@ public actor Outbox {
             }
         }
 
+        persist()
         return OutboxFlush(delivered: delivered, dropped: dropped, remaining: items.count)
     }
 

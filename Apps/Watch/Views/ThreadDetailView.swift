@@ -5,14 +5,17 @@ import AmpKit
 @Observable
 final class ThreadDetailModel {
     enum CancelStatus: Equatable {
-        case idle, confirming, sending, sent, failed(String)
+        case idle, confirming, sending, sent, queued, failed(String)
     }
 
     enum ArmStatus: Equatable {
-        case idle, sending, failed(String)
+        case idle, sending, queued, failed(String)
     }
 
     private(set) var state: Loadable<[ThreadMessage]> = .loading
+    /// Spend so far, once known. Loaded alongside the transcript; a failure
+    /// here is not worth an error screen, the Cost row just shows no number.
+    private(set) var usage: ThreadUsage?
     var cancelStatus: CancelStatus = .idle
     /// What the watch last asked for. The bridge keeps the real value in
     /// memory and forgets it when its orb restarts, so this is a request, not
@@ -21,42 +24,43 @@ final class ThreadDetailModel {
     var armStatus: ArmStatus = .idle
 
     func arm(_ level: ArmLevel, threadID: String, using environment: AmpEnvironment) async {
-        guard let sink = environment.promptSink else {
+        armStatus = .sending
+        // Only the latest level matters, so a fixed id per thread replaces a
+        // queued earlier pick instead of sending both.
+        guard let outcome = await environment.deliver(.arm(threadID: threadID, level: level), id: "arm-\(threadID)") else {
             armStatus = .failed("No bridge configured")
             return
         }
-        armStatus = .sending
-        do {
-            try await sink.send(.arm(threadID: threadID, level: level), idempotencyKey: nil)
-            armStatus = .idle
-        } catch {
-            let amp = error as? AmpError ?? .transport(String(describing: error))
-            armStatus = .failed(amp.watchDescription)
+        switch outcome {
+        case .delivered: armStatus = .idle
+        case .queued: armStatus = .queued
+        case let .dropped(reason): armStatus = .failed(OutboxStatus.note(for: reason))
         }
     }
 
     func cancel(threadID: String, using environment: AmpEnvironment) async {
-        guard let sink = environment.promptSink else {
+        cancelStatus = .sending
+        guard let outcome = await environment.deliver(.cancel(threadID: threadID)) else {
             cancelStatus = .failed("No bridge configured")
             return
         }
-        cancelStatus = .sending
-        do {
-            try await sink.send(.cancel(threadID: threadID), idempotencyKey: nil)
-            cancelStatus = .sent
-        } catch {
-            let amp = error as? AmpError ?? .transport(String(describing: error))
-            cancelStatus = .failed(amp.watchDescription)
+        switch outcome {
+        case .delivered: cancelStatus = .sent
+        case .queued: cancelStatus = .queued
+        case let .dropped(reason): cancelStatus = .failed(OutboxStatus.note(for: reason))
         }
     }
 
     func load(threadID: String, from environment: AmpEnvironment) async {
+        let client = environment.client
+        let cost = Task { try? await client.usage(threadID: threadID) }
         do {
-            let page = try await environment.client.messages(threadID: threadID, limit: 25)
+            let page = try await client.messages(threadID: threadID, limit: 25)
             state = .loaded(page.items)
         } catch {
             state = .failed(error as? AmpError ?? .transport(String(describing: error)))
         }
+        usage = await cost.value
     }
 }
 
@@ -65,6 +69,7 @@ struct ThreadDetailView: View {
 
     @Environment(\.amp) private var amp
     @State private var model = ThreadDetailModel()
+    @State private var budgetCap: Double?
 
     var body: some View {
         Group {
@@ -86,6 +91,7 @@ struct ThreadDetailView: View {
         .navigationTitle("Thread")
         .navigationBarTitleDisplayMode(.inline)
         .task { await model.load(threadID: thread.id, from: amp) }
+        .onAppear { budgetCap = amp.preferences.load().budgetCapUSD }
     }
 
     private func transcript(_ messages: [ThreadMessage]) -> some View {
@@ -117,18 +123,33 @@ struct ThreadDetailView: View {
                 .tint(AmpTheme.ember)
                 .accessibilityIdentifier("reply-button")
 
-                NavigationLink {
-                    UsageView(thread: thread)
-                } label: {
-                    Label("Cost", systemImage: "dollarsign.circle")
-                }
-                .tint(AmpTheme.parchmentDim)
+                costRow
 
                 armControl
             }
             .padding(.bottom, 8)
         }
         .accessibilityIdentifier("thread-detail")
+    }
+
+    /// The Cost link carries the number and, past the cap, a warning in the
+    /// accent colour — the thing a student wants to see without opening
+    /// anything.
+    private var costRow: some View {
+        let standing = BudgetStanding(usageUSD: model.usage?.usage ?? 0, capUSD: budgetCap)
+        return NavigationLink {
+            UsageView(thread: thread)
+        } label: {
+            HStack {
+                Label("Cost", systemImage: "dollarsign.circle")
+                Spacer()
+                if let usage = model.usage {
+                    BudgetBadge(usageUSD: usage.usage, standing: standing)
+                }
+            }
+        }
+        .tint(standing == .fine ? AmpTheme.parchmentDim : AmpTheme.ember)
+        .accessibilityIdentifier("cost-row")
     }
 
     @ViewBuilder
@@ -161,6 +182,10 @@ struct ThreadDetailView: View {
             Text("stop requested")
                 .font(AmpTheme.body(11))
                 .foregroundStyle(AmpTheme.parchment)
+        case .queued:
+            Text("saved — stops when the watch is back online")
+                .font(AmpTheme.body(11))
+                .foregroundStyle(AmpTheme.parchment)
         case let .failed(message):
             Text(message)
                 .font(AmpTheme.body(11))
@@ -188,7 +213,14 @@ struct ThreadDetailView: View {
         }
         .accessibilityIdentifier("arm-picker")
 
-        if case let .failed(message) = model.armStatus {
+        switch model.armStatus {
+        case .idle, .sending:
+            EmptyView()
+        case .queued:
+            Text("saved — applies when the watch is back online")
+                .font(AmpTheme.body(11))
+                .foregroundStyle(AmpTheme.parchment)
+        case let .failed(message):
             Text(message)
                 .font(AmpTheme.body(11))
                 .foregroundStyle(AmpTheme.ember)
@@ -245,6 +277,32 @@ struct MessageView: View {
         case .assistant: "amp"
         case .system: "system"
         case .unknown: "—"
+        }
+    }
+}
+
+/// Spend and, when it matters, how it sits against the cap.
+struct BudgetBadge: View {
+    let usageUSD: Double
+    let standing: BudgetStanding
+
+    var body: some View {
+        HStack(spacing: 3) {
+            if standing != .fine {
+                Image(systemName: "exclamationmark.triangle.fill")
+            }
+            Text(text)
+        }
+        .font(AmpTheme.body(12, weight: standing == .fine ? .regular : .medium))
+        .foregroundStyle(standing == .fine ? AmpTheme.parchmentDim : AmpTheme.ember)
+        .accessibilityIdentifier(standing == .fine ? "cost-amount" : "budget-warning")
+    }
+
+    private var text: String {
+        switch standing {
+        case .fine: Money.compact(usd: usageUSD)
+        case .near: "\(Money.compact(usd: usageUSD)) near cap"
+        case .over: "\(Money.compact(usd: usageUSD)) over cap"
         }
     }
 }

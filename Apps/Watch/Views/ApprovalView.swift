@@ -5,26 +5,22 @@ import AmpKit
 @Observable
 final class ApprovalModel {
     enum Status: Equatable {
-        case deciding, sending, sent(ApprovalDecision), failed(String)
+        case deciding, sending, sent(ApprovalDecision), queued(ApprovalDecision), failed(String)
     }
 
     private(set) var status: Status = .deciding
 
     func send(_ decision: ApprovalDecision, for approval: PendingApproval, using environment: AmpEnvironment) async {
-        guard let sink = environment.promptSink else {
+        status = .sending
+        let command = WatchCommand.decide(approvalID: approval.id, threadID: approval.threadID, decision: decision)
+        guard let outcome = await environment.deliver(command) else {
             status = .failed("No bridge configured")
             return
         }
-        status = .sending
-        do {
-            try await sink.send(
-                .decide(approvalID: approval.id, threadID: approval.threadID, decision: decision),
-                idempotencyKey: nil
-            )
-            status = .sent(decision)
-        } catch {
-            let amp = error as? AmpError ?? .transport(String(describing: error))
-            status = .failed(amp.watchDescription)
+        switch outcome {
+        case .delivered: status = .sent(decision)
+        case .queued: status = .queued(decision)
+        case let .dropped(reason): status = .failed(OutboxStatus.note(for: reason))
         }
     }
 }
@@ -180,6 +176,14 @@ struct ApprovalView: View {
                 .foregroundStyle(AmpTheme.parchmentDim)
         case let .sent(decision):
             Text(sentLabel(decision))
+                .font(AmpTheme.body(11))
+                .foregroundStyle(AmpTheme.parchment)
+                .accessibilityIdentifier("approval-status")
+        case .queued:
+            // A decision that sits too long is dropped, not delivered late
+            // (`Outbox.decisionTTL`); say so, because "saved" alone would
+            // read as "done".
+            Text("saved — sends when back online, or is dropped after \(Int(Outbox.decisionTTL / 60)) min")
                 .font(AmpTheme.body(11))
                 .foregroundStyle(AmpTheme.parchment)
                 .accessibilityIdentifier("approval-status")

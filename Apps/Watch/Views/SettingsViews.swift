@@ -71,9 +71,43 @@ struct SettingsView: View {
     @State private var newToken = ""
     @State private var newWebhookURL = ""
     @State private var problem: String?
+    @State private var preferences = WatchPreferences.defaults
+
+    /// Caps a wrist can pick from. Typing a number on a watch is not worth
+    /// the precision; `nil` is off.
+    private static let capChoices: [Double?] = [nil, 1, 2, 5, 10, 20, 50]
 
     var body: some View {
         List {
+            Section {
+                NavigationLink {
+                    PhrasesView()
+                } label: {
+                    Label("Saved phrases", systemImage: "text.quote")
+                }
+                .accessibilityIdentifier("phrases-link")
+
+                NavigationLink {
+                    TemplatesView()
+                } label: {
+                    Label("Thread templates", systemImage: "doc.text")
+                }
+                .accessibilityIdentifier("templates-link")
+
+                Picker(selection: $preferences.budgetCapUSD) {
+                    ForEach(Self.capChoices, id: \.self) { cap in
+                        Text(cap.map { Money.compact(usd: $0) } ?? "off").tag(cap)
+                    }
+                } label: {
+                    Label("Flag a thread at", systemImage: "dollarsign.circle")
+                }
+                .pickerStyle(.navigationLink)
+                .onChange(of: preferences.budgetCapUSD) { _, _ in amp.preferences.save(preferences) }
+                .accessibilityIdentifier("budget-picker")
+            }
+            .font(AmpTheme.body(13))
+            .listRowBackground(Color.clear)
+
             secretRow(
                 title: "API token",
                 value: tokenSummary,
@@ -115,6 +149,7 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("settings")
+        .onAppear { preferences = amp.preferences.load() }
     }
 
     private var tokenSummary: String {
