@@ -11,10 +11,16 @@ final class ThreadListModel {
     /// is not looked up; each lookup is one request against a budget shared
     /// with everything else the watch does.
     private(set) var usage: [String: ThreadUsage] = [:]
+    private(set) var hasMore = false
+    private(set) var isRefreshing = false
 
     func load(from environment: AmpEnvironment) async {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
         do {
             let page = try await environment.client.threads(limit: 25)
+            hasMore = page.nextCursor != nil
             state = .loaded(page.items)
             let now = environment.now()
             await loadUsage(for: page.items.filter { Self.isWorthPricing($0, now: now) }, from: environment)
@@ -52,7 +58,27 @@ struct ThreadListView: View {
     @State private var budgetCap: Double?
 
     var body: some View {
-        Group {
+        List {
+            NavigationLink {
+                PuckView()
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Puck")
+                        .font(AmpTheme.body(16, weight: .semibold))
+                        .foregroundStyle(AmpTheme.parchment)
+                    Text("Phone / web only")
+                        .font(AmpTheme.body(12))
+                        .foregroundStyle(AmpTheme.parchmentDim)
+                }
+            }
+            .listRowBackground(AmpTheme.surface)
+            .accessibilityIdentifier("puck-button")
+
+            if amp.outbox.pending > 0 || amp.outbox.note != nil {
+                OutboxBanner(status: amp.outbox)
+                    .listRowBackground(AmpTheme.canvas)
+            }
+
             switch model.state {
             case .loading:
                 LoadingView(label: "Threads")
@@ -60,15 +86,33 @@ struct ThreadListView: View {
                 ErrorView(error: error) { await model.load(from: amp) }
             case let .loaded(threads) where threads.isEmpty:
                 EmptyStateView(
-                    headline: "Nothing moving",
-                    detail: "Start a thread on the web or in the CLI."
+                    headline: "No threads",
+                    detail: "Tap + to start a thread. Sending requires a watch bridge in Settings."
                 )
             case let .loaded(threads):
-                list(threads)
+                groups(threads)
+                Section {
+                    Text("Showing \(threads.count) threads, grouped by first repository. Newest updates first. Not agent run status.")
+                    if model.hasMore {
+                        Text("This overview loads up to 25 threads. More are available in Amp on your phone or the web.")
+                            .accessibilityIdentifier("threads-more-note")
+                    }
+                    Button("Refresh") { Task { await model.load(from: amp) } }
+                        .disabled(model.isRefreshing)
+                        .accessibilityIdentifier("refresh-threads")
+                }
+                .font(AmpTheme.body(12))
+                .foregroundStyle(AmpTheme.parchmentDim)
+                .listRowBackground(AmpTheme.canvas)
             }
         }
+        .listStyle(.plain)
+        .accessibilityIdentifier("thread-list")
+        .navigationDestination(for: ThreadSummary.self) { thread in
+            ThreadDetailView(thread: thread)
+        }
         .containerBackground(AmpTheme.canvas.gradient, for: .navigation)
-        .navigationTitle("amp")
+        .navigationTitle("Threads")
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 NavigationLink {
@@ -95,28 +139,28 @@ struct ThreadListView: View {
         .onAppear { budgetCap = amp.preferences.load().budgetCapUSD }
     }
 
-    private func list(_ threads: [ThreadSummary]) -> some View {
-        List {
-            if amp.outbox.pending > 0 || amp.outbox.note != nil {
-                OutboxBanner(status: amp.outbox)
-                    .listRowBackground(Color.clear)
-            }
-            ForEach(threads) { thread in
-                NavigationLink(value: thread) {
-                    ThreadRow(
-                        thread: thread,
-                        now: amp.now(),
-                        usageUSD: model.usage[thread.id]?.usage,
-                        budgetCapUSD: budgetCap
-                    )
+    private func groups(_ threads: [ThreadSummary]) -> some View {
+        ForEach(ThreadGroup.grouped(threads)) { group in
+            Section {
+                ForEach(group.threads) { thread in
+                    NavigationLink(value: thread) {
+                        ThreadRow(
+                            thread: thread,
+                            now: amp.now(),
+                            usageUSD: model.usage[thread.id]?.usage,
+                            budgetCapUSD: budgetCap
+                        )
+                    }
+                    .listRowBackground(AmpTheme.canvas)
                 }
-                .listRowBackground(Color.clear)
+            } header: {
+                Text("\(group.title) · \(group.threads.count)")
+                    .font(AmpTheme.body(12, weight: .semibold))
+                    .foregroundStyle(AmpTheme.parchmentDim)
+                    .textCase(nil)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("thread-group")
             }
-        }
-        .listStyle(.plain)
-        .accessibilityIdentifier("thread-list")
-        .navigationDestination(for: ThreadSummary.self) { thread in
-            ThreadDetailView(thread: thread)
         }
     }
 }
@@ -154,29 +198,18 @@ struct ThreadRow: View {
     var usageUSD: Double?
     var budgetCapUSD: Double?
 
-    private var activity: ThreadActivity { thread.activity(now: now) }
     private var standing: BudgetStanding { BudgetStanding(usageUSD: usageUSD ?? 0, capUSD: budgetCapUSD) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                ActivityDot(activity: activity)
-                    .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
-                Text(thread.displayTitle)
-                    .font(AmpTheme.display(16))
-                    .foregroundStyle(AmpTheme.parchment)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-            }
+            Text(thread.displayTitle)
+                .font(AmpTheme.body(16, weight: .medium))
+                .foregroundStyle(AmpTheme.parchment)
+                .lineLimit(3)
+                .multilineTextAlignment(.leading)
 
             HStack(spacing: 4) {
-                if let repository = thread.repositories.first {
-                    Text(repository.shortName)
-                        .lineLimit(1)
-                        .truncationMode(.head)
-                    Text("·")
-                }
-                Text(RelativeTime.short(from: thread.updatedAt, to: now))
+                Text("Updated \(RelativeTime.short(from: thread.updatedAt, to: now))")
                 if let usageUSD, standing == .fine {
                     Spacer(minLength: 4)
                     BudgetBadge(usageUSD: usageUSD, standing: standing)
@@ -185,8 +218,7 @@ struct ThreadRow: View {
             .font(AmpTheme.body(12))
             .foregroundStyle(AmpTheme.parchmentDim)
 
-            // A flag needs its own line; squeezed next to the repo name it
-            // wraps into three and pushes the name off the row.
+            // Give a budget warning its own line instead of squeezing the timestamp.
             if let usageUSD, standing != .fine {
                 BudgetBadge(usageUSD: usageUSD, standing: standing)
             }

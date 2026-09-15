@@ -149,6 +149,7 @@ public actor FixtureAmpClient: AmpClient, AmpPromptSink {
     public enum Behavior: Sendable {
         case ok
         case empty
+        case grouped
         case failing(AmpError)
     }
 
@@ -164,6 +165,15 @@ public actor FixtureAmpClient: AmpClient, AmpPromptSink {
     public func threads(limit: Int, cursor: String?) async throws -> Page<ThreadSummary> {
         try check()
         if case .empty = behavior { return Page(items: []) }
+        if case .grouped = behavior {
+            let samples = Fixtures.threads(now: now)
+            let extra = ThreadSummary(
+                id: "T-grouped-example", title: "多语言与语音功能：让手表上的对话更容易阅读",
+                updatedAt: now.addingTimeInterval(-90),
+                repositories: samples[0].repositories
+            )
+            return Page(items: [samples[1], samples[3], extra, samples[0]], nextCursor: "fixture-next")
+        }
         return Page(items: Array(Fixtures.threads(now: now).prefix(limit)))
     }
 

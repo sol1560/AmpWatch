@@ -17,7 +17,8 @@ milestone 2 — see [Roadmap](#roadmap).
 
 | Screen | Shows |
 | --- | --- |
-| Threads | One row per thread: activity dot, title, repo, time since last change; live threads also show spend, flagged past your cap. Anything still waiting to send sits at the top |
+| Threads | Up to 25 threads grouped by first repository, newest updates first, with group counts, three-line titles and explicit update times. Available spend and budget warnings stay visible; queued messages sit above the groups |
+| Puck | A clearly labelled phone/web-only entry at the top of Threads, explaining where to use Puck. It does not start a Puck conversation on the watch |
 | Thread | The transcript, trimmed to what fits a wrist; Stop, Reply, Cost, and "Ask me first" |
 | Reply | Dictate or scribble a prompt into a running thread, or tap a saved phrase |
 | New thread | Start a thread from a template or a dictated prompt |
@@ -64,7 +65,17 @@ divide that way:
   an Amp plugin that opens one durable webhook and appends the prompt as a user
   message.
 
-### Two limits worth knowing before you file a bug
+### Limits worth knowing before you file a bug
+
+**Puck is not connected to AmpWatch.** The current External API client and
+watch bridge do not expose Puck conversations. Use the Puck entry in the Amp
+phone app's sidebar or on ampcode.com. The watch's + button creates a regular
+thread through the bridge, not a Puck conversation.
+
+**Repository groups are not Amp projects.** They describe only the fetched
+page, not account-wide totals. A thread with multiple repositories appears
+once under the first one. Missing repository metadata is labelled
+"Repository unavailable", including when the token lacks contents access.
 
 **There is no agent run state over HTTP.** The API returns `updatedAt` but not
 the plugin API's `idle | running | awaiting-approval | error`. So the activity

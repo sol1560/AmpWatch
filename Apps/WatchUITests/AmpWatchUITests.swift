@@ -18,33 +18,70 @@ final class AmpWatchUITests: XCTestCase {
         return app
     }
 
+    private func reveal(_ element: XCUIElement) {
+        if element.waitForExistence(timeout: 5), element.isHittable { return }
+        for _ in 0..<60 {
+            XCUIDevice.shared.rotateDigitalCrown(delta: 0.08)
+            if element.exists && element.isHittable { return }
+        }
+        XCTFail("Could not reveal \(element)")
+    }
+
+    func testPuckEntryExplainsTheLimitWithoutOfferingFakeChat() {
+        let app = launch(screen: "threads")
+        let puck = app.descendants(matching: .any)["puck-button"]
+        XCTAssertTrue(puck.waitForExistence(timeout: 20))
+        XCTAssertTrue(puck.label.contains("Phone / web only"))
+        puck.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["puck"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["puck-unavailable"].exists)
+        XCTAssertFalse(app.buttons["send-button"].exists)
+        XCTAssertFalse(app.textFields.firstMatch.exists)
+    }
+
+    func testGroupedOverviewShowsCountsTitlesAndMissingRepository() {
+        let app = launch(screen: "threads-grouped")
+        XCTAssertTrue(app.descendants(matching: .any)["puck-button"].waitForExistence(timeout: 20))
+        let groups = app.descendants(matching: .any).matching(identifier: "thread-group")
+        let first = groups.containing(NSPredicate(format: "label == %@", "soll/AmpWatch · 2")).firstMatch
+        reveal(first)
+        let rows = app.descendants(matching: .any).matching(identifier: "thread-row")
+        let chinese = rows.containing(NSPredicate(format: "label CONTAINS %@", "多语言与语音功能")).firstMatch
+        reveal(chinese)
+        XCTAssertTrue(chinese.label.contains("Updated 1m"))
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "grouped-chinese-title"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        reveal(groups.containing(NSPredicate(format: "label CONTAINS %@", "Repository unavailable")).firstMatch)
+        reveal(app.staticTexts["threads-more-note"])
+    }
+
     func testThreadListShowsFirstAndLastFixtureThread() {
         let app = launch(screen: "threads")
         let list = app.descendants(matching: .any)["thread-list"]
         XCTAssertTrue(list.waitForExistence(timeout: 20))
 
-        // `List` only materialises rows that fit on screen, so counting rows
-        // measures the watch size, not the data. Check the ends instead: the
-        // first fixture thread is visible at rest, and the untitled fourth one
-        // (rendered by its ID prefix) appears after scrolling.
+        // Puck and section headers take space. Reveal named rows rather than
+        // assuming a particular number of threads fits on every watch size.
         let rows = app.descendants(matching: .any).matching(identifier: "thread-row")
-        XCTAssertTrue(rows.element(boundBy: 0).label.contains("Fix the flaky watchOS simulator boot"))
-
-        list.swipeUp()
-        list.swipeUp()
+        let first = rows.containing(NSPredicate(format: "label CONTAINS %@", "Fix the flaky watchOS simulator boot")).firstMatch
+        reveal(first)
+        XCTAssertTrue(first.label.contains("Updated 12s"))
         let last = rows.containing(NSPredicate(format: "label CONTAINS %@", "T-77c3ba91")).firstMatch
-        XCTAssertTrue(last.waitForExistence(timeout: 5))
+        reveal(last)
     }
 
     func testEmptyStateIsReachableAndNotJustAnEmptyList() {
         let app = launch(screen: "threads-empty")
+        XCTAssertTrue(app.descendants(matching: .any)["puck-button"].waitForExistence(timeout: 20))
         XCTAssertTrue(app.descendants(matching: .any)["empty-state"].waitForExistence(timeout: 20))
     }
 
     func testUnauthorizedRendersAnActionableErrorRatherThanABlankScreen() {
         let app = launch(screen: "threads-error")
         XCTAssertTrue(app.descendants(matching: .any)["error-state"].waitForExistence(timeout: 20))
-        XCTAssertTrue(app.buttons["Retry"].exists)
+        reveal(app.buttons["Retry"])
     }
 
     func testSendIsDisabledUntilThePromptHasContent() {
@@ -176,7 +213,7 @@ final class AmpWatchUITests: XCTestCase {
         let app = launch(screen: "threads-queued")
         XCTAssertTrue(app.descendants(matching: .any)["thread-list"].waitForExistence(timeout: 20))
         let banner = app.descendants(matching: .any)["outbox-banner"]
-        XCTAssertTrue(banner.waitForExistence(timeout: 5))
+        reveal(banner)
         XCTAssertTrue(banner.label.contains("2 waiting to send"), banner.label)
         // Without anything queued there is no banner at all, not an empty one.
         let plain = launch(screen: "threads")
@@ -191,9 +228,11 @@ final class AmpWatchUITests: XCTestCase {
         // The first fixture thread is live and has spent $1.87 against a
         // $1.50 cap; the second is quiet, so its cost is never fetched.
         let flagged = rows.containing(NSPredicate(format: "label CONTAINS %@", "over cap")).firstMatch
-        XCTAssertTrue(flagged.waitForExistence(timeout: 10))
+        reveal(flagged)
         XCTAssertTrue(flagged.label.contains("$1.87"), flagged.label)
-        XCTAssertFalse(rows.element(boundBy: 1).label.contains("$"), rows.element(boundBy: 1).label)
+        let quiet = rows.containing(NSPredicate(format: "label CONTAINS %@", "Trim the bundle")).firstMatch
+        reveal(quiet)
+        XCTAssertFalse(quiet.label.contains("$"), quiet.label)
     }
 
     func testDetailCostRowWarnsOnlyPastTheCap() {

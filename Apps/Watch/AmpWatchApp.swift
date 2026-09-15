@@ -141,6 +141,8 @@ struct RootView: View {
 /// a happy-path run would never reach — without driving the UI.
 enum ScreenshotScene: String, CaseIterable {
     case threads
+    case puck
+    case threadsGrouped = "threads-grouped"
     case threadsEmpty = "threads-empty"
     case threadsError = "threads-error"
     case detail
@@ -173,6 +175,7 @@ enum ScreenshotScene: String, CaseIterable {
 
     var environment: AmpEnvironment {
         switch self {
+        case .threadsGrouped: .fixture(behavior: .grouped)
         case .threadsEmpty: .fixture(behavior: .empty)
         case .threadsError: .fixture(behavior: .failing(.unauthorized))
         case .setup: .fixture(secrets: InMemorySecretStore())
@@ -197,8 +200,10 @@ enum ScreenshotScene: String, CaseIterable {
     var view: some View {
         let thread = Fixtures.threads()[0]
         switch self {
-        case .threads, .threadsEmpty, .threadsError, .threadsQueued, .threadsOverCap:
+        case .threads, .threadsGrouped, .threadsEmpty, .threadsError, .threadsQueued, .threadsOverCap:
             NavigationStack { ThreadListView() }.tint(AmpTheme.ember)
+        case .puck:
+            NavigationStack { PuckView() }.tint(AmpTheme.ember)
         case .detail, .detailOverCap:
             NavigationStack { ThreadDetailView(thread: thread) }.tint(AmpTheme.ember)
         case .compose:
