@@ -42,7 +42,7 @@ targets:
         GENERATE_INFOPLIST_FILE: "YES"
         INFOPLIST_KEY_CFBundleDisplayName: Amp
         INFOPLIST_KEY_WKApplication: "YES"
-        INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp: "YES"
+        INFOPLIST_KEY_WKWatchOnly: "YES"
         ENABLE_PREVIEWS: "YES"
 
   AmpWatchUITests:
