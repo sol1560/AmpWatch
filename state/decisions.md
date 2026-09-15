@@ -52,3 +52,9 @@ adversarial_each_milestone=false, adversarial_final=true, use_test_agent=true
   all succeeded, no ceiling found. Approval timeout is therefore a product
   choice; set to 10 min on both sides (`APPROVAL_TIMEOUT_MS`,
   `Outbox.decisionTTL`). Veto-able.
+- M6: the widget extension reads a file (`Glance`) in the app group; it holds
+  no credential and never fetches. "Awaiting you" = approval notifications
+  still delivered and younger than the decision window. "Spend today" = sum
+  of usage for threads changed since local midnight, and the list now
+  fetches usage for those threads too (was: live only). Always-on: ember
+  only on the approval screen; transcript and command text `privacySensitive`.

@@ -24,11 +24,20 @@ milestone 2 — see [Roadmap](#roadmap).
 | Cost | Thread spend, broken down per model |
 | Approve? | A held shell command, with a warning for anything destructive; Approve is missing when the command cannot be shown whole |
 | Phrases, Templates | Edit the phrases and templates above, on the watch |
+| Complications | Two watch-face widgets: "Waiting on you" (held tool calls, threads moving) and "Spend today". Fed by the app, never by the network — see below |
 
 Every send goes through an on-disk outbox first. With no link, the screen
 says "saved" instead of failing, and the next raise of the wrist retries in
 order. A queued approval older than the bridge's own timeout (10 minutes) is
 dropped rather than delivered late.
+
+The complications read a small file the app writes after every thread-list
+load (`Glance`: counts, today's spend, one thread title). The widget
+extension holds no token and never fetches, so a face is exactly as fresh as
+the last time you opened the app, and says "as of 12m ago" rather than
+pretending. Past 30 minutes it shows "open to refresh". In always-on mode
+the ember accent is kept only for the approval screen; everything else steps
+down to parchment, and transcript text and held commands are redacted.
 
 ## How it talks to Amp
 
@@ -122,8 +131,11 @@ lit in a dark room and costs battery in always-on mode.
 3. ~~Push notifications from the plugin (`docs/PUSH.md`)~~
 4. ~~Approvals: arm a thread from the watch, decide held shell commands~~
 5. ~~Offline outbox, saved phrases, thread templates, a spend cap~~
-6. Complication and background refresh, so the wrist shows thread activity
-   without opening the app
+6. ~~Complications and VoiceOver labels; always-on rendering keeps the accent
+   for blocked threads only~~
+
+Not done and not planned in this repo: background refresh (the widget
+would need a credential), an iOS companion, App Store submission.
 
 ## Licence
 

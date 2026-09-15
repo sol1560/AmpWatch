@@ -179,6 +179,9 @@ M3 = pushes, M4 = approvals.
 **Tier 3 — ambient**
 
 - Complications: threads running · **threads awaiting you** · today's spend
+  (built: two widgets fed by a `Glance` file the app writes; "awaiting you"
+  is counted from approval notifications still sitting in Notification
+  Center, which is the only record the watch has of what is waiting on it)
 - Handoff to the laptop via `NSUserActivity`
 
 ### Input
@@ -227,7 +230,7 @@ Each ends with CI screenshots as its reviewable artifact.
 | **M3** | Pushes | `done` / `error` arrive on the wrist via APNs from the plugin; notification actions work |
 | **M4** | **Approvals** | Approve a real tool call from the watch; unknowns 1–2 above measured and written down |
 | **M5** | Outbox + templates + budget guard | Three prompts written in airplane mode arrive in order, exactly once |
-| **M6** | Battery + polish | Measured drain across a real school day; complications; VoiceOver |
+| **M6** | Polish | Complications; VoiceOver labels; always-on accent rule. Battery drain across a school day is a manual check the owner does with the watch on |
 
 M1 is first because it is the smallest thing that proves the watch, the Wi-Fi
 and the token work together, and it needs no plugin.
