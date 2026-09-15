@@ -57,12 +57,14 @@ final class AmpSessionTests: XCTestCase {
         let store = InMemorySecretStore()
         try store.write("t", for: .accessToken)
         try store.write("u", for: .webhookURL)
+        try store.write("speech-test-key", for: .elevenLabsAPIKey)
         XCTAssertEqual(try store.read(.accessToken), "t")
         try store.write(nil, for: .accessToken)
         XCTAssertNil(try store.read(.accessToken))
         XCTAssertEqual(try store.read(.webhookURL), "u")
         try store.removeAll()
         XCTAssertNil(try store.read(.webhookURL))
+        XCTAssertNil(try store.read(.elevenLabsAPIKey))
     }
 
     func testMaskingNeverRevealsMoreThanTheSuffix() {

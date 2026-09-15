@@ -47,6 +47,21 @@ final class SpeechTranscriberTests: XCTestCase {
         XCTAssertTrue(transport.requests.isEmpty)
     }
 
+    func testMaximumSizeIsAcceptedAndNetworkFailureIsSanitized() async throws {
+        let transport = StubTransport(json: #"{"text":"Accepted"}"#)
+        let result = try await ElevenLabsTranscriber(apiKey: "test-key", transport: transport)
+            .transcribe(audio: Data(repeating: 0, count: ElevenLabsTranscriber.maximumBytes))
+        XCTAssertEqual(result, "Accepted")
+        let offline = StubTransport(responses: [])
+        do {
+            _ = try await ElevenLabsTranscriber(apiKey: "test-key", transport: offline).transcribe(audio: Data([1]))
+            XCTFail("Expected failure")
+        } catch {
+            XCTAssertEqual(error as? TranscriptionError, .unavailable)
+        }
+        XCTAssertEqual(offline.requests.count, 1)
+    }
+
     func testMalformedAndEmptyTranscriptsDoNotBecomeDrafts() async {
         for json in ["{}", "not json", #"{"text":"  \n "}"#] {
             do {
