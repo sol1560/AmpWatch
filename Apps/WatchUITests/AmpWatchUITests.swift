@@ -71,21 +71,25 @@ final class AmpWatchUITests: XCTestCase {
         let app = launch(screen: "settings")
         let settings = app.descendants(matching: .any)["settings"]
         XCTAssertTrue(settings.waitForExistence(timeout: 20))
-        // The credentials sit below the wrist preferences; `List` only
-        // materialises rows once they scroll into view, and a 40mm screen
-        // needs more than one swipe to get there.
+        // The credentials sit below the wrist preferences. `List` only keeps
+        // the rows currently on screen in the accessibility tree, and one
+        // `swipeUp()` flings a 40mm screen straight past them to the bottom
+        // (seen in the xcresult of run 34948838337). Turn the crown a little
+        // at a time instead and stop as soon as the row is there.
         let token = app.descendants(matching: .any)["token-value"]
-        for _ in 0..<4 where !token.exists {
-            settings.swipeUp()
-        }
-        for _ in 0..<4 where !token.exists {
-            app.swipeUp()
+        for _ in 0..<30 where !token.exists {
+            XCUIDevice.shared.rotateDigitalCrown(delta: 0.08)
         }
         // The fixture token ends in "7f3a"; a screenshot of this screen ends up
         // in a public CI artifact, so only that suffix may be on screen.
         XCTAssertTrue(token.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertEqual(token.label, "…7f3a")
-        XCTAssertEqual(app.descendants(matching: .any)["webhook-value"].label, "hooks.example.test")
+        let webhook = app.descendants(matching: .any)["webhook-value"]
+        for _ in 0..<10 where !webhook.exists {
+            XCUIDevice.shared.rotateDigitalCrown(delta: 0.08)
+        }
+        XCTAssertTrue(webhook.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(webhook.label, "hooks.example.test")
         XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "fixture-token")).firstMatch.exists)
     }
 
