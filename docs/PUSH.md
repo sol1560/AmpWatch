@@ -77,5 +77,11 @@ If nothing arrives:
 
 - A tap on the notification body opens the app to the thread list, not the
   thread. The list is sorted by activity, so the thread is at the top.
-- Approval pushes (category `APPROVAL`, actions Approve / Reject) are wired on
-  the watch but nothing sends them until M4.
+- Approval pushes (category `APPROVAL`) arrive only for threads the watch has
+  armed from the thread screen ("Ask me first"). The banner's Approve button
+  is honoured only for a command the approval screen would not warn about;
+  anything flagged, or too long to show whole, opens the screen instead.
+  Reject from the banner always goes through.
+- The arm level is kept in the thread's plugin memory. When that orb restarts
+  the thread is unarmed again, and the picker on the watch will be wrong until
+  you set it again.

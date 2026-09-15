@@ -125,9 +125,26 @@ Not measured: what happens to ownership when the owning orb is paused or
 archived. Until it is, the hub thread stays awake during use (see cost note).
 
 **Unknown 2 — how long a `tool.call` handler may stay pending.** Not
-documented. If the ceiling is short, the handler returns `reject-and-continue`
-with a stated reason at the deadline and the watch offers "retry with approval
-pre-granted for this exact call". Measured in the approvals milestone.
+documented. The bridge answers on its own clock, `APPROVAL_TIMEOUT_MS` in
+`Plugin/amp-watch-bridge.ts` (4 minutes), with `reject-and-continue` and a
+message that tells the agent not to retry; that way the outcome is always the
+bridge's, never Amp's. Verified in this orb on 2026-09-15: a held
+`shell_command` with no decision came back as
+"Tool rejected by plugin: Nobody approved this from the watch within 4
+minutes", and the turn continued. A probe of Amp's own ceiling (slow handler
+at 2/5/10/20 min) is running in thread B; its result belongs here.
+
+**Approvals as built (M4).** A thread is *unarmed* until the watch sends
+`{ "type": "arm", "level": "off" | "risky" | "all" }` for it. `risky` holds
+shell commands whose text matches `DESTRUCTIVE_PATTERNS` (the same list the
+watch warns about — a test keeps the two in step); `all` holds every shell
+command; edits, reads and searches are never held. The level lives in the
+thread's plugin instance memory; it resets when that orb restarts, and the
+thread screen says so. Round trip measured in this orb: `arm` → forwarded to
+`approve-<threadID>` → `tool.call` held → `announce awaiting-approval` →
+`decide approve` from the shared URL → forwarded → the command ran, about a
+minute end to end with log latency; `decide reject` → "Rejected from the
+watch", the command did not run.
 
 **Unknown 3 — does a webhook delivery resume a paused orb?** If yes, the hub
 needs no `keepAlive()` and costs nothing between commands. If no, the hub holds
@@ -204,8 +221,8 @@ Each ends with CI screenshots as its reviewable artifact.
 | **M0** ✅ | Fixture UI, CI builds + screenshots on a watchOS simulator | Done |
 | **M1** | Real reads | Watch shows your real threads and messages over school Wi-Fi with a read-only token |
 | **M2** | Hub plugin + writes | `prompt`, `cancel`, `create` from the watch reach a real orb thread via the webhook |
-| **M3** | **Approvals** | Approve a real tool call from the watch; unknowns 1–3 above measured and written down |
-| **M4** | Pushes | `awaiting-approval` arrives on the wrist within seconds via APNs from the plugin; notification actions work |
+| **M3** | Pushes | `done` / `error` arrive on the wrist via APNs from the plugin; notification actions work |
+| **M4** | **Approvals** | Approve a real tool call from the watch; unknowns 1–2 above measured and written down |
 | **M5** | Outbox + templates + budget guard | Three prompts written in airplane mode arrive in order, exactly once |
 | **M6** | Battery + polish | Measured drain across a real school day; complications; VoiceOver |
 

@@ -21,6 +21,7 @@ milestone 2 — see [Roadmap](#roadmap).
 | Thread | The transcript, trimmed to what fits a wrist |
 | Reply | Dictate or scribble a prompt into a running thread |
 | Cost | Thread spend, broken down per model |
+| Approve? | A held shell command, with a warning for anything destructive; Approve is missing when the command cannot be shown whole |
 
 ## How it talks to Amp
 
@@ -110,12 +111,12 @@ lit in a dark room and costs battery in always-on mode.
 ## Roadmap
 
 1. ~~Fixture-backed UI, rendered and screenshotted in CI~~
-2. Live `AmpAPIClient` + `WebhookPromptSink` wiring, credentials in the Keychain
-3. Credential onboarding — a minimal iOS companion that hands the token over
-   with WatchConnectivity, since typing an OAuth secret on a watch is not a plan
-4. Complication and background refresh, so the wrist shows thread activity
+2. ~~Live `AmpAPIClient` + `WebhookPromptSink` wiring, credentials in the Keychain~~
+3. ~~Push notifications from the plugin (`docs/PUSH.md`)~~
+4. ~~Approvals: arm a thread from the watch, decide held shell commands~~
+5. Offline outbox, saved phrases, thread templates, a spend cap
+6. Complication and background refresh, so the wrist shows thread activity
    without opening the app
-5. Real push notifications — blocked on a paid Apple Developer account for APNs
 
 ## Licence
 
