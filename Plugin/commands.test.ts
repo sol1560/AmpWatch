@@ -86,3 +86,28 @@ describe('SeenEvents', () => {
 		expect(seen.markSeen('a')).toBe(true)
 	})
 })
+
+describe('parseCommand: register and announce', () => {
+	test('register normalises the token to lower case and defaults to sandbox', () => {
+		const result = parseCommand({ type: 'register', deviceToken: 'AB'.repeat(32) })
+		expect(result).toEqual({
+			ok: true,
+			command: { type: 'register', deviceToken: 'ab'.repeat(32), environment: 'sandbox' },
+		})
+	})
+
+	test('register rejects a token that is not 64 hex characters', () => {
+		expect(parseCommand({ type: 'register', deviceToken: 'ab'.repeat(31) }).ok).toBe(false)
+		expect(parseCommand({ type: 'register', deviceToken: 'zz'.repeat(32) }).ok).toBe(false)
+		expect(parseCommand({ type: 'register' }).ok).toBe(false)
+	})
+
+	test('announce keeps title and summary optional and rejects unknown outcomes', () => {
+		expect(parseCommand({ type: 'announce', threadID: thread, outcome: 'done', summary: '  ok  ' })).toEqual({
+			ok: true,
+			command: { type: 'announce', threadID: thread, outcome: 'done', title: null, summary: 'ok' },
+		})
+		expect(parseCommand({ type: 'announce', threadID: thread, outcome: 'running' }).ok).toBe(false)
+		expect(parseCommand({ type: 'announce', outcome: 'done' }).ok).toBe(false)
+	})
+})

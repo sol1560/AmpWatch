@@ -41,13 +41,14 @@ final class WebhookPromptSinkTests: XCTestCase {
     }
 
     func testEveryCommandHasTheWireShapeThePluginParses() async throws {
-        let transport = StubTransport(responses: Array(repeating: HTTPResponse(status: 202), count: 4))
+        let transport = StubTransport(responses: Array(repeating: HTTPResponse(status: 202), count: 5))
         let sink = WebhookPromptSink(webhookURL: webhook, transport: transport)
 
         try await sink.send(.prompt(threadID: "T-1", text: "go", steer: false), idempotencyKey: "outbox-7")
         try await sink.send(.cancel(threadID: "T-1"), idempotencyKey: nil)
         try await sink.send(.create(prompt: "new thread", mode: .high), idempotencyKey: nil)
         try await sink.send(.decide(approvalID: "call-9", threadID: "T-1", decision: .reject), idempotencyKey: nil)
+        try await sink.send(.register(deviceToken: "ab12", environment: .production), idempotencyKey: nil)
 
         let bodies = try transport.requests.map {
             try JSONDecoder().decode([String: String].self, from: try XCTUnwrap($0.body))
@@ -57,6 +58,7 @@ final class WebhookPromptSinkTests: XCTestCase {
             ["type": "cancel", "threadID": "T-1"],
             ["type": "create", "prompt": "new thread", "mode": "high"],
             ["type": "decide", "approvalID": "call-9", "threadID": "T-1", "decision": "reject"],
+            ["type": "register", "deviceToken": "ab12", "environment": "production"],
         ])
         // An outbox retry reuses its item ID so Amp can collapse duplicates.
         XCTAssertEqual(transport.requests[0].headers["Idempotency-Key"], "outbox-7")

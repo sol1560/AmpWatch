@@ -114,12 +114,12 @@ this project (A = `T-01a0a325-7a11-73eb-a5a7-46c40b37076d`, B =
 - The plugin process's working directory is `.amp/plugins`, not the workspace
   root; use `amp.system.workspaceRoot` for paths.
 
-Consequence: the hub owns `amp-watch`; approvals use a per-thread key
-`approve-<threadID>` whose URL only that thread's handler receives. The
-per-thread instance tells the hub its approval URL by POSTing to the shared
-URL (registering `amp-watch` from a non-hub thread is harmless: it returns the
-hub's URL without taking ownership). The watch only ever talks to the hub; the
-hub forwards decisions. No external store is needed.
+Consequence: all instances register `amp-watch` with one shared handler, and
+one of them receives; approvals use a per-thread key `approve-<threadID>`
+whose URL only that thread's handler receives. The per-thread instance tells
+the receiver its approval URL by POSTing to the shared URL, the same way it
+announces turn outcomes. The watch only ever talks to the shared URL; the
+receiver forwards decisions. No external store is needed.
 
 Not measured: what happens to ownership when the owning orb is paused or
 archived. Until it is, the hub thread stays awake during use (see cost note).

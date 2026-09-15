@@ -73,6 +73,14 @@ struct ThreadDetailView: View {
                     .accessibilityIdentifier("thread-title")
                 header
 
+                // Stop sits under the header, where the eye lands on a live
+                // thread; it is only offered while the thread looks mid-turn,
+                // because stopping an idle thread is a no-op that costs rate
+                // budget.
+                if thread.activity(now: amp.now()) == .live {
+                    cancelControl
+                }
+
                 ForEach(messages) { message in
                     MessageView(message: message, now: amp.now())
                 }
@@ -91,12 +99,6 @@ struct ThreadDetailView: View {
                     Label("Cost", systemImage: "dollarsign.circle")
                 }
                 .tint(AmpTheme.parchmentDim)
-
-                // Cancel is only offered while the thread looks mid-turn;
-                // cancelling an idle thread is a no-op that costs rate budget.
-                if thread.activity(now: amp.now()) == .live {
-                    cancelControl
-                }
             }
             .padding(.bottom, 8)
         }

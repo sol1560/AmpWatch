@@ -5,6 +5,13 @@ public enum AgentMode: String, Sendable, Codable, CaseIterable {
     case low, medium, high, ultra
 }
 
+/// Which APNs gateway can reach this build. Xcode installs talk to the
+/// sandbox gateway; TestFlight and App Store installs to production. A token
+/// sent to the wrong gateway is rejected with `BadDeviceToken`.
+public enum PushEnvironment: String, Sendable, Codable {
+    case sandbox, production
+}
+
 /// Everything the watch can ask the bridge to do. One definition, used by the
 /// outbox, the sink and the UI; its wire form is `Plugin/commands.ts`.
 public enum WatchCommand: Sendable, Hashable, Codable {
@@ -14,12 +21,15 @@ public enum WatchCommand: Sendable, Hashable, Codable {
     case cancel(threadID: String)
     case create(prompt: String, mode: AgentMode)
     case decide(approvalID: String, threadID: String, decision: ApprovalDecision)
+    /// Tell the bridge where to send pushes. Sent on every launch, because the
+    /// bridge keeps registrations in memory only.
+    case register(deviceToken: String, environment: PushEnvironment)
 
     /// The thread this command acts on, if it acts on one.
     public var threadID: String? {
         switch self {
         case let .prompt(threadID, _, _), let .cancel(threadID), let .decide(_, threadID, _): threadID
-        case .create: nil
+        case .create, .register: nil
         }
     }
 
@@ -36,6 +46,8 @@ public enum WatchCommand: Sendable, Hashable, Codable {
             ["type": "create", "prompt": prompt, "mode": mode.rawValue]
         case let .decide(approvalID, threadID, decision):
             ["type": "decide", "approvalID": approvalID, "threadID": threadID, "decision": decision.rawValue]
+        case let .register(deviceToken, environment):
+            ["type": "register", "deviceToken": deviceToken, "environment": environment.rawValue]
         }
     }
 }

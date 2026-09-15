@@ -3,6 +3,8 @@ import AmpKit
 
 @main
 struct AmpWatchApp: App {
+    @WKApplicationDelegateAdaptor(PushRegistrar.self) private var push
+
     var body: some Scene {
         WindowGroup {
             if let screen = ScreenshotScene.requested {
@@ -10,7 +12,7 @@ struct AmpWatchApp: App {
                 // captures on the watchOS simulator.
                 screen.view.environment(\.amp, screen.environment)
             } else {
-                RootView(secrets: KeychainSecretStore(service: "com.soll.ampwatch"))
+                RootView(secrets: KeychainSecretStore(service: "com.soll.ampwatch"), push: push)
             }
         }
     }
@@ -19,12 +21,19 @@ struct AmpWatchApp: App {
 /// Owns the session. Everything below reads the resulting `AmpEnvironment`;
 /// when a credential changes, `reload` rebuilds the session and SwiftUI
 /// re-renders the tree with a fresh client.
+///
+/// Also the one place that sends on behalf of the system: the push
+/// registration after launch, and the command behind a notification button.
 struct RootView: View {
     let secrets: any SecretStore
+    let push: PushRegistrar?
     @State private var session: AmpSession
+    /// Bumped on every reload so a new sink re-registers the device token.
+    @State private var generation = 0
 
-    init(secrets: any SecretStore) {
+    init(secrets: any SecretStore, push: PushRegistrar? = nil) {
         self.secrets = secrets
+        self.push = push
         _session = State(initialValue: Self.load(secrets))
     }
 
@@ -39,6 +48,22 @@ struct RootView: View {
         }
         .environment(\.amp, environment)
         .tint(AmpTheme.ember)
+        .task(id: "\(push?.deviceToken ?? "")|\(generation)") { await registerForPushes() }
+        .task(id: push?.pendingCommand) { await sendPendingCommand() }
+    }
+
+    private func registerForPushes() async {
+        guard let token = push?.deviceToken, case let .ready(_, sink) = session else { return }
+        try? secrets.write(token, for: .deviceToken)
+        // Best effort: the bridge only learns the token this way, and the next
+        // launch tries again. Nothing to show the user if it fails.
+        try? await sink.send(.register(deviceToken: token, environment: PushRegistrar.environment), idempotencyKey: nil)
+    }
+
+    private func sendPendingCommand() async {
+        guard let push, let command = push.pendingCommand, case let .ready(_, sink) = session else { return }
+        push.pendingCommand = nil
+        try? await sink.send(command, idempotencyKey: nil)
     }
 
     private var environment: AmpEnvironment {
@@ -53,7 +78,10 @@ struct RootView: View {
             promptSink: sink,
             secrets: secrets,
             now: { Date() },
-            reload: { session = Self.load(secrets) }
+            reload: {
+                session = Self.load(secrets)
+                generation += 1
+            }
         )
     }
 

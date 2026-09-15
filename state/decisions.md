@@ -22,9 +22,17 @@ adversarial_each_milestone=false, adversarial_final=true, use_test_agent=true
   hub orb thread (writes). No phone, no laptop in the loop.
 - The plugin only ever acts on threads the watch names by ID; it never
   enumerates threads on its own.
-- Hub role is opt-in by a gitignored marker file in the hub orb
-  (`.amp/ampwatch-hub`) so the auto-loaded plugin in other threads does not
-  compete for the webhook.
+- Every plugin instance registers `amp-watch` with the same handler (Amp
+  delivers to one of them; measured). The gitignored marker file
+  `.amp/ampwatch-hub` only decides which orb writes the URL file. Earlier
+  plan (only the hub registers) was dropped in M3: non-hub instances need the
+  URL to announce their turn outcomes, and a no-op receiver would lose events.
+- Pushes: only `agent.end` is announced (one event per turn), not
+  `agent.start`, to keep within the 10/min webhook budget shared with watch
+  commands. `cancelled` is not pushed (the user asked for it).
+- APNs credentials are Amp project secrets read from `process.env`
+  (`APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_P8`, `APNS_ENV`); never files.
+- Notification tap opens the list, not the thread (no deep link yet).
 - The `tool.call` handler is a no-op unless the thread has been armed by a
   watch command; otherwise it would intercept the agent's own tool calls in
   every thread of this project, including this one.

@@ -50,12 +50,17 @@ struct NewThreadView: View {
                     .font(AmpTheme.body(14))
                     .accessibilityIdentifier("new-thread-prompt")
 
-                Picker("Mode", selection: $model.mode) {
+                Picker(selection: $model.mode) {
                     ForEach(AgentMode.allCases, id: \.self) { mode in
                         Text(mode.rawValue).tag(mode)
                     }
+                } label: {
+                    Label("Mode", systemImage: "gauge.with.dots.needle.33percent")
                 }
-                .font(AmpTheme.body(12))
+                // The watch's native picker: a row that opens a wheel list.
+                // An inline picker draws as a bare outline on this screen size.
+                .pickerStyle(.navigationLink)
+                .font(AmpTheme.body(13))
                 .accessibilityIdentifier("mode-picker")
 
                 Button {

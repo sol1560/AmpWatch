@@ -30,22 +30,27 @@ programmatic check and, where a screen changes, an inspected CI screenshot.
   Compose posts through the sink; detail gets Cancel; Settings gets the URL.
 - Gate: `bun test` green; plugin loads in this orb without errors; CI green.
 
-## M3 — Approvals
+## M3 — Pushes
 
-- F3.1 `Plugin/approvals.ts`: pure queue (`pending`, `resolve`, `expire`).
-- F3.2 `tool.call` handler armed per thread; decision channel per F2.0.
-- F3.3 `ApprovalView` on the watch driven by `PendingApproval.recommendation()`;
+- F3.1 `Plugin/apns.ts`: JWT (ES256 via `crypto.subtle`) + payload builders;
+  tested. Send via `amp.$` `curl --http2` with a curl config file.
+- F3.2 Bridge: `register` and `announce` commands; every instance announces
+  its own `agent.end`; the receiver pushes to registered tokens.
+- F3.3 Watch: `PushRegistrar` (WKApplicationDelegate + notification
+  categories with actions), device token stored and re-sent per launch;
+  `docs/PUSH.md`.
+- Gate: `bun test`, `swift test`; round trip through the real webhook in the
+  orb; fake-key probe against Apple's sandbox gateway; CI build green.
+
+## M4 — Approvals
+
+- F4.1 `Plugin/approvals.ts`: pure queue (`pending`, `resolve`, `expire`).
+- F4.2 `tool.call` handler armed per thread; per-thread key `approve-<threadID>`,
+  URL announced to the shared webhook; receiver forwards `decide`; approval push.
+- F4.3 `ApprovalView` on the watch driven by `PendingApproval.recommendation()`;
   `ScreenshotScene.approval`, `approval-deferred`, `approval-destructive`.
-- F3.4 Ceiling measurement with a slow handler; recorded in DESIGN.md.
+- F4.4 Ceiling measurement with a slow handler; recorded in DESIGN.md.
 - Gate: `bun test`, `swift test`, CI screenshots inspected.
-
-## M4 — Pushes
-
-- F4.1 `Plugin/apns.ts`: JWT (ES256 via `crypto.subtle`) + payload builders;
-  tested. Send via `amp.$` `curl --http2`.
-- F4.2 Watch: `UNUserNotificationCenter` registration, categories with
-  actions, device token stored; `docs/PUSH.md`.
-- Gate: unit tests; CI build green.
 
 ## M5 — Offline and faster
 

@@ -9,10 +9,21 @@ export const MAX_PROMPT_LENGTH = 4000
 export const AGENT_MODES = ['low', 'medium', 'high', 'ultra'] as const
 export type AgentMode = (typeof AGENT_MODES)[number]
 
+export const ANNOUNCE_OUTCOMES = ['done', 'error', 'cancelled', 'awaiting-approval'] as const
+export type AnnounceOutcome = (typeof ANNOUNCE_OUTCOMES)[number]
+
 export type WatchCommand =
 	| { type: 'prompt'; threadID: string; prompt: string; steer: boolean }
 	| { type: 'cancel'; threadID: string }
 	| { type: 'create'; prompt: string; mode: AgentMode }
+	/** The watch tells the hub where to send pushes. Sent on every launch. */
+	| { type: 'register'; deviceToken: string; environment: 'sandbox' | 'production' }
+	/**
+	 * A thread's own plugin instance reports a turn outcome to the hub. Every
+	 * project thread posts these to the shared URL; only the hub turns them
+	 * into pushes. `summary` is the assistant's last line, already clipped.
+	 */
+	| { type: 'announce'; threadID: string; outcome: AnnounceOutcome; title: string | null; summary: string | null }
 
 export type ParseResult = { ok: true; command: WatchCommand } | { ok: false; reason: string }
 
@@ -60,12 +71,44 @@ export function parseCommand(body: Uint8Array | string | unknown): ParseResult {
 			}
 			return { ok: true, command: { type: 'create', prompt: prompt.value, mode: mode as AgentMode } }
 		}
+		case 'register': {
+			const deviceToken = fields.deviceToken
+			if (typeof deviceToken !== 'string' || !/^[0-9a-f]{64}$/i.test(deviceToken)) {
+				return { ok: false, reason: 'deviceToken missing or malformed' }
+			}
+			const environment = fields.environment === 'production' ? 'production' : 'sandbox'
+			return { ok: true, command: { type: 'register', deviceToken: deviceToken.toLowerCase(), environment } }
+		}
+		case 'announce': {
+			const threadID = readThreadID(fields)
+			if (!threadID.ok) return threadID
+			const outcome = fields.outcome
+			if (!(ANNOUNCE_OUTCOMES as readonly unknown[]).includes(outcome)) {
+				return { ok: false, reason: `unknown outcome ${String(outcome)}` }
+			}
+			return {
+				ok: true,
+				command: {
+					type: 'announce',
+					threadID: threadID.value,
+					outcome: outcome as AnnounceOutcome,
+					title: optionalText(fields.title),
+					summary: optionalText(fields.summary),
+				},
+			}
+		}
 		default:
 			return { ok: false, reason: `unknown command type ${String(type)}` }
 	}
 }
 
 type Field = { ok: true; value: string } | { ok: false; reason: string }
+
+function optionalText(value: unknown): string | null {
+	if (typeof value !== 'string') return null
+	const trimmed = value.trim()
+	return trimmed.length === 0 ? null : trimmed.slice(0, MAX_PROMPT_LENGTH)
+}
 
 function readThreadID(fields: Record<string, unknown>): Field {
 	const threadID = fields.threadID

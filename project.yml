@@ -44,6 +44,8 @@ targets:
         INFOPLIST_KEY_WKApplication: "YES"
         INFOPLIST_KEY_WKWatchOnly: "YES"
         ENABLE_PREVIEWS: "YES"
+        # Pushes. Xcode flips this to `production` for App Store builds.
+        CODE_SIGN_ENTITLEMENTS: Apps/Watch/AmpWatch.entitlements
 
   AmpWatchUITests:
     type: bundle.ui-testing
