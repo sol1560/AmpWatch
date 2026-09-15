@@ -78,9 +78,7 @@ claiming a run state.
 at-least-once delivery — not that the agent read it. The compose screen says
 "queued", not "sent".
 
-## Build it
-
-### Language and voice input
+## Language and voice input
 
 The interface follows the watch's preferred language: English and Simplified
 Chinese are included; unsupported languages fall back to English. Your thread
@@ -105,6 +103,8 @@ CI uses fixtures, not a paid transcription account. Real microphone access,
 recognition quality, and school Wi-Fi connectivity must still be checked on
 a watch with an actual key. Test cancellation, mixed Chinese/English speech,
 denied microphone access, and loss of connectivity before relying on it.
+
+## Build it
 
 ```bash
 brew install xcodegen xcbeautify
