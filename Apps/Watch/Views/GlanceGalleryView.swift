@@ -8,6 +8,7 @@ import AmpKit
 /// reviewer what the complications say. It is reachable only through the
 /// screenshot harness; it is not a screen the user navigates to.
 struct GlanceGalleryView: View {
+    let kind: GlanceKind
     @Environment(\.amp) private var amp
 
     private var glance: Glance {
@@ -22,20 +23,18 @@ struct GlanceGalleryView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
-                section("Waiting on you", kind: .awaiting)
-                AmpRule()
-                section("Spend today", kind: .spend)
+                section(kind == .awaiting ? "Waiting on you" : "Spend today", kind: kind)
                 AmpRule()
                 Text("Stale")
                     .font(AmpTheme.body(11, weight: .medium))
                     .foregroundStyle(AmpTheme.parchmentDim)
-                face(.accessoryRectangular, kind: .awaiting, glance: nil, id: "face-stale")
+                face(.accessoryRectangular, kind: kind, glance: nil, id: "face-stale")
             }
             .padding(.horizontal, 4)
         }
         .containerBackground(AmpTheme.canvas.gradient, for: .navigation)
         .navigationTitle("Faces")
-        .accessibilityIdentifier("glance")
+        .accessibilityIdentifier(kind == .awaiting ? "glance" : "glance-spend")
     }
 
     private func section(_ title: String, kind: GlanceKind) -> some View {

@@ -239,11 +239,14 @@ final class AmpWatchUITests: XCTestCase {
         // Fixture: one live thread, one held call, $1.87 of usage today.
         XCTAssertEqual(faces["face-awaiting-circular"].label, "Amp: 1 waiting on you, 1 moving")
         XCTAssertEqual(faces["face-awaiting-rectangular"].label, "Amp: 1 waiting on you, 1 moving")
-        XCTAssertEqual(faces["face-spend-circular"].label, "Amp: $1.87 today")
         // A face with nothing to show says so instead of showing zeros.
         app.descendants(matching: .any)["glance"].swipeUp()
         let stale = faces["face-stale"]
         XCTAssertTrue(stale.waitForExistence(timeout: 5))
         XCTAssertEqual(stale.label, "Amp: open to refresh")
+
+        let spend = launch(screen: "glance-spend")
+        XCTAssertTrue(spend.descendants(matching: .any)["glance-spend"].waitForExistence(timeout: 20))
+        XCTAssertEqual(spend.descendants(matching: .any)["face-spend-circular"].label, "Amp: $1.87 today")
     }
 }

@@ -156,6 +156,7 @@ enum ScreenshotScene: String, CaseIterable {
     case phrases
     case templates
     case glance
+    case glanceSpend = "glance-spend"
 
     static let launchArgument = "-ampwatch-screen"
 
@@ -218,7 +219,9 @@ enum ScreenshotScene: String, CaseIterable {
         case .templates:
             NavigationStack { TemplatesView() }.tint(AmpTheme.ember)
         case .glance:
-            NavigationStack { GlanceGalleryView() }.tint(AmpTheme.ember)
+            NavigationStack { GlanceGalleryView(kind: .awaiting) }.tint(AmpTheme.ember)
+        case .glanceSpend:
+            NavigationStack { GlanceGalleryView(kind: .spend) }.tint(AmpTheme.ember)
         }
     }
 }
