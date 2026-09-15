@@ -77,24 +77,7 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Apps/Widgets/AmpWatchWidgets.entitlements
         SKIP_INSTALL: "YES"
 
-  AmpWatchUITests:
-    type: bundle.ui-testing
-    platform: watchOS
-    sources:
-      - path: Apps/WatchUITests
-    dependencies:
-      - target: AmpWatch
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.soll.ampwatch.uitests
-        TEST_TARGET_NAME: AmpWatch
-
-schemes:
-  AmpWatch:
-    build:
-      targets:
-        AmpWatch: all
-        # Complications. Reads a file the app writes into the shared app group;
+  # Complications. Reads a file the app writes into the shared app group;
   # holds no credentials and never talks to the network.
   AmpWatchWidgets:
     type: app-extension
@@ -121,7 +104,24 @@ schemes:
         CODE_SIGN_ENTITLEMENTS: Apps/Widgets/AmpWatchWidgets.entitlements
         SKIP_INSTALL: "YES"
 
-  AmpWatchUITests: [test]
+  AmpWatchUITests:
+    type: bundle.ui-testing
+    platform: watchOS
+    sources:
+      - path: Apps/WatchUITests
+    dependencies:
+      - target: AmpWatch
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.soll.ampwatch.uitests
+        TEST_TARGET_NAME: AmpWatch
+
+schemes:
+  AmpWatch:
+    build:
+      targets:
+        AmpWatch: all
+        AmpWatchUITests: [test]
     run:
       config: Debug
     test:
