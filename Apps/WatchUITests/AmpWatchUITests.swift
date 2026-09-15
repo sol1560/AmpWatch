@@ -72,11 +72,14 @@ final class AmpWatchUITests: XCTestCase {
         let settings = app.descendants(matching: .any)["settings"]
         XCTAssertTrue(settings.waitForExistence(timeout: 20))
         // The credentials sit below the wrist preferences; `List` only
-        // materialises rows once they scroll into view.
-        settings.swipeUp()
+        // materialises rows once they scroll into view, and a 40mm screen
+        // needs more than one swipe to get there.
+        let token = app.staticTexts["token-value"]
+        for _ in 0..<6 where !token.exists {
+            settings.swipeUp()
+        }
         // The fixture token ends in "7f3a"; a screenshot of this screen ends up
         // in a public CI artifact, so only that suffix may be on screen.
-        let token = app.staticTexts["token-value"]
         XCTAssertTrue(token.waitForExistence(timeout: 5))
         XCTAssertEqual(token.label, "…7f3a")
         XCTAssertEqual(app.staticTexts["webhook-value"].label, "hooks.example.test")
@@ -224,5 +227,20 @@ final class AmpWatchUITests: XCTestCase {
         let app = launch(screen: "new-thread")
         XCTAssertTrue(app.descendants(matching: .any)["new-thread"].waitForExistence(timeout: 20))
         XCTAssertTrue(app.descendants(matching: .any)["template-picker"].exists)
+    }
+
+    func testComplicationFacesSpeakOneSentenceEach() {
+        let app = launch(screen: "glance")
+        XCTAssertTrue(app.descendants(matching: .any)["glance"].waitForExistence(timeout: 20))
+        let faces = app.descendants(matching: .any)
+        // Fixture: one live thread, one held call, $1.87 of usage today.
+        XCTAssertEqual(faces["face-awaiting-circular"].label, "Amp: 1 waiting on you, 1 moving")
+        XCTAssertEqual(faces["face-awaiting-rectangular"].label, "Amp: 1 waiting on you, 1 moving")
+        XCTAssertEqual(faces["face-spend-circular"].label, "Amp: $1.87 today")
+        // A face with nothing to show says so instead of showing zeros.
+        app.descendants(matching: .any)["glance"].swipeUp()
+        let stale = faces["face-stale"]
+        XCTAssertTrue(stale.waitForExistence(timeout: 5))
+        XCTAssertEqual(stale.label, "Amp: open to refresh")
     }
 }

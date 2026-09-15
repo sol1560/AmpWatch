@@ -38,7 +38,7 @@ struct SetupView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(AmpTheme.ember)
+                .ampAccent()
                 .disabled(token.trimmingCharacters(in: .whitespaces).isEmpty)
                 .accessibilityIdentifier("continue-button")
 
@@ -99,7 +99,7 @@ struct SettingsView: View {
                         Text(cap.map { Money.compact(usd: $0) } ?? "off").tag(cap)
                     }
                 } label: {
-                    Label("Flag a thread at", systemImage: "dollarsign.circle")
+                    Label("Flag at", systemImage: "dollarsign.circle")
                 }
                 .pickerStyle(.navigationLink)
                 .onChange(of: preferences.budgetCapUSD) { _, _ in amp.preferences.save(preferences) }
