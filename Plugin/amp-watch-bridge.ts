@@ -1,62 +1,94 @@
 /**
- * AmpWatch write bridge.
+ * AmpWatch bridge: the write path from the watch into Amp.
  *
- * The Amp External API is read-only for threads, so the watch cannot post a
- * prompt to ampcode.com directly. This plugin opens one durable webhook and
- * appends whatever the watch sends as a user message on the target thread.
+ * The External API is read-only for threads, so the watch cannot prompt,
+ * cancel or create through ampcode.com directly. This plugin runs in the
+ * project's orb threads. Exactly one of them — the *hub* — owns a durable
+ * webhook and applies the commands the watch POSTs to it:
  *
- * Load it in an orb thread you keep around:
+ *   { "type": "prompt" | "steer", "threadID": "T-…", "prompt": "…" }
+ *   { "type": "cancel", "threadID": "T-…" }
+ *   { "type": "create", "prompt": "…", "mode"?: "low"|"medium"|"high"|"ultra" }
  *
- *   amp plugins load Plugin/amp-watch-bridge.ts
+ * Which thread is the hub is decided by a marker file in that orb's
+ * workspace, `.amp/ampwatch-hub` (gitignored). Every other thread loads the
+ * plugin too — for the approval hooks in `approvals.ts` — but must not
+ * register the webhook: project threads of one user share a registration per
+ * key, and two owners would race for the same events.
  *
- * It replies with a capability URL. Treat that URL as a password — anyone
- * holding it can prompt your threads without signing in to Amp. Put it in the
- * watch Keychain and nowhere else. Archiving the owning thread pauses its orb
- * and the URL starts returning 404.
+ * The webhook URL is a credential. It is written to the hub orb's
+ * `.amp/ampwatch-hub.url` (also gitignored) so the owner can copy it into the
+ * watch once; it is never logged and never posted into a thread.
  *
- * Limits that shape the watch UI: the webhook accepts a burst of 10 events and
- * refills at 10 per minute, the handler returns no body (so the watch learns
- * only that Amp accepted the event, never what the agent replied), and delivery
- * is at-least-once — hence the Idempotency-Key the watch sends.
+ * Limits that shape the watch UI: a burst of 10 events, refilling at 10 per
+ * minute; the handler returns no body, so the watch learns only that Amp
+ * accepted the event; delivery is at-least-once, hence `SeenEvents`.
  */
+import { existsSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { PluginAPI, ThreadID } from '@ampcode/plugin'
+import { parseCommand, SeenEvents, type WatchCommand } from './commands'
 
-interface WatchPrompt {
-	threadID: string
-	prompt: string
-}
-
-function parsePrompt(body: unknown): WatchPrompt | null {
-	if (typeof body !== 'object' || body === null) return null
-	const { threadID, prompt } = body as Record<string, unknown>
-	if (typeof threadID !== 'string' || !threadID.startsWith('T-')) return null
-	if (typeof prompt !== 'string') return null
-	const trimmed = prompt.trim()
-	if (trimmed.length === 0 || trimmed.length > 4000) return null
-	return { threadID, prompt: trimmed }
-}
+export const HUB_MARKER = '.amp/ampwatch-hub'
+export const HUB_URL_FILE = '.amp/ampwatch-hub.url'
+export const WEBHOOK_KEY = 'amp-watch'
 
 export default async function (amp: PluginAPI) {
+	const root = amp.system.workspaceRoot ? amp.helpers.filePathFromURI(amp.system.workspaceRoot) : null
+	if (!root || !existsSync(join(root, HUB_MARKER))) {
+		amp.logger.log(`amp-watch: not the hub (no ${HUB_MARKER}); webhook not registered`)
+		return
+	}
+
+	const seen = new SeenEvents()
 	const { url } = await amp.createWebhook({
-		key: 'amp-watch',
-		handler: async (event) => {
-			const parsed = parsePrompt(event.body)
-			if (!parsed) {
-				// Do not throw: a malformed event would otherwise be retried
-				// forever by at-least-once delivery.
-				amp.logger.log('amp-watch: discarding malformed event')
+		key: WEBHOOK_KEY,
+		handler: async (event, ctx) => {
+			if (!seen.markSeen(event.id)) {
+				ctx.logger.log(`amp-watch: repeat delivery of ${event.id} ignored`)
 				return
 			}
-
-			await amp.threads.get(parsed.threadID as ThreadID).appendUserMessage(
-				{ type: 'user-message', content: parsed.prompt },
-				// Prefer the wrist prompt over queued work: the whole point is
-				// to redirect an agent that is already running.
-				{ steer: true },
-			)
-			amp.logger.log(`amp-watch: delivered a prompt to ${parsed.threadID}`)
+			const parsed = parseCommand(event.body)
+			if (!parsed.ok) {
+				// Do not throw: at-least-once delivery would retry a malformed
+				// event forever.
+				ctx.logger.log(`amp-watch: discarding event ${event.id}: ${parsed.reason}`)
+				return
+			}
+			await apply(amp, parsed.command)
+			ctx.logger.log(`amp-watch: applied ${describe(parsed.command)}`)
 		},
 	})
 
-	amp.logger.log(`amp-watch bridge ready. Capability URL issued (${url.length} chars).`)
+	writeFileSync(join(root, HUB_URL_FILE), url + '\n', { mode: 0o600 })
+	amp.logger.log(`amp-watch: hub ready; capability URL written to ${HUB_URL_FILE}`)
+}
+
+async function apply(amp: PluginAPI, command: WatchCommand): Promise<void> {
+	switch (command.type) {
+		case 'prompt':
+			await amp.threads
+				.get(command.threadID as ThreadID)
+				.appendUserMessage({ type: 'user-message', content: command.prompt }, { steer: command.steer })
+			return
+		case 'cancel':
+			await amp.threads.get(command.threadID as ThreadID).cancel()
+			return
+		case 'create': {
+			const thread = await amp.getBuiltinAgent(command.mode).createThread({ executor: 'orb' })
+			await thread.append([{ type: 'user-message', content: command.prompt }])
+			return
+		}
+	}
+}
+
+function describe(command: WatchCommand): string {
+	switch (command.type) {
+		case 'prompt':
+			return `${command.steer ? 'steer' : 'prompt'} → ${command.threadID}`
+		case 'cancel':
+			return `cancel → ${command.threadID}`
+		case 'create':
+			return `create (${command.mode})`
+	}
 }

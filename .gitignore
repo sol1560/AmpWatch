@@ -11,3 +11,8 @@ Packages/*/.build/
 .DS_Store
 xcuserdata/
 *.xcuserstate
+
+# AmpWatch hub role and its capability URL live only in the hub orb.
+.amp/ampwatch-hub
+.amp/ampwatch-hub.url
+.amp/in/
