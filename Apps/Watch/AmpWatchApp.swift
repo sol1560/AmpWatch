@@ -130,7 +130,7 @@ struct RootView: View {
     private static func load(_ secrets: any SecretStore) -> AmpSession {
         // Fail fast rather than wait for connectivity: the outbox is the
         // retry, and a spinner that outlives a wrist raise is a hang.
-        AmpSession.load(from: secrets, transport: .watchDefault())
+        AmpSession.load(from: secrets, transport: URLSessionTransport.watchDefault())
     }
 }
 
