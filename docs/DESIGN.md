@@ -2,249 +2,243 @@
 
 ## Thesis
 
-A watch is not a small phone. It is an **ambient awareness device with an
-interrupt channel**, and it is worn for the seconds when you are not at a
-computer. So AmpWatch does exactly one job:
+You have a laptop and your iPhone is one room away. So the watch is not a
+replacement for either — it is a **discreet control surface** for agents that
+are already running, usable during the hours when picking up the laptop or the
+phone is not an option.
 
-> Tell me whether my agents still need me, and let me say one sentence back.
+That makes the design goal *control*, not *awareness*:
 
-Everything that takes longer than a glance is handed off to the phone or the
-web. The app never tries to be a place where you read code, review a diff, or
-approve a plan.
+> Keep me in the loop with my agents, and let me unblock them, from my wrist.
 
-## Who it is for
+The previous draft assumed the watch was alone and had to be a read-mostly
+glance device. It is not alone. The phone next door changes the architecture.
 
-Someone who runs several Amp threads in orbs, walks away, and wants to know —
-without pulling out a phone — whether anything finished, stalled, or is
-quietly burning money. Amp already has official iOS and macOS apps with
-notifications; the watch wins only on **raise-to-wake, complication, and
-haptics**, and loses on everything involving reading or typing. The design
-leans entirely on the first three.
+## The phone is the broker
 
-## Interaction budget
+Apple's documentation settles this: calling `sendMessage` from a watch app
+**wakes the counterpart iOS app in the background** and makes it reachable. The
+watch and the iPhone also stay connected over Wi-Fi when Bluetooth is out of
+range.
 
-Every screen has a time budget. If a design cannot meet it, the design is
-wrong, not the budget.
-
-| Action | Budget | Surface |
-| --- | --- | --- |
-| Is anything different? | 2 s | Watch face complication |
-| What changed? | 5 s | Thread list |
-| What did it say? | 8 s | Thread transcript, newest first |
-| Say one sentence back | 10 s | Dictation + preset chips |
-| Anything longer | — | Hand off to iPhone / web |
-
-## The feature that makes it worth wearing
-
-Not the thread list — the **stall detector**.
-
-The External API exposes no agent run state, only `updatedAt`. But a client
-that polls repeatedly can see something a single request cannot: whether
-`updatedAt` is still advancing. From a sequence of observations you can derive
-the transition that actually matters —
-
-> this thread was moving, and now it has stopped.
-
-That is the notification a user wants ("amp finished", "amp is stuck"), and it
-needs no push server, no Apple Developer account, and no cooperation from Amp.
+So the iPhone — sitting untouched next door — becomes the piece of
+infrastructure this app needed and I previously proposed building on
+Cloudflare:
 
 ```diagram
-poll t0   updatedAt = 09:40:12   ─┐
-poll t1   updatedAt = 09:43:55    ├─ advancing → moving
-poll t2   updatedAt = 09:47:01   ─┘
-poll t3   updatedAt = 09:47:01   ─┐
-poll t4   updatedAt = 09:47:01   ─┴─ unchanged across 2 polls → SETTLED
-                                     └─▶ local notification, once
+┌───────────────┐
+│ Apple Watch   │  UI only. No credentials. No API knowledge.
+└───────┬───────┘
+        │ WCSession sendMessage  (wakes the phone app in the background)
+        ▼
+┌───────────────┐
+│ iPhone        │  The broker. Never touched.
+│  · Keychain   │  · holds the workspace credential
+│  · API calls  │  · does every read
+│  · webhook    │  · does every write
+│  · local notif│  · alerts mirror to the watch automatically
+└───────┬───────┘
+        │ HTTPS
+        ▼
+┌──────────────────────────────┐
+│ ampcode.com  +  orb plugin   │
+└──────────────────────────────┘
 ```
 
-### What this costs honestly
+Three problems disappear at once:
 
-- watchOS background refresh is **opportunistic**, not scheduled. Realistic
-  latency is minutes to tens of minutes, and the budget is granted mainly to
-  apps with a complication on the *active* watch face. The complication is
-  therefore not decoration; it is the mechanism that buys the refresh budget.
-- The detector must fire **once** per settle, not once per poll. That is the
-  single most likely bug in the whole app and it gets a test.
-- A thread that settles and then resumes must be able to settle again.
+1. **Credentials leave the watch.** The workspace-scoped M2M secret lives in the
+   iPhone Keychain, which is the right place for it. No Cloudflare Worker, no
+   custom broker, no token-narrowing scheme — for v1.
+2. **Alerts need no push server.** An iOS local notification is mirrored to the
+   watch by the system when the watch is on your wrist and the phone is locked.
+   That is exactly the state your phone is in. Free alert channel.
+3. **The watch stops needing its own internet.** Bluetooth or same-network
+   Wi-Fi to the phone is enough, and the phone carries the connection.
 
-## Screens
+### Degraded modes, in order
 
-### 0. Complication — the primary surface
+| Situation | Behaviour |
+| --- | --- |
+| Phone reachable (normal) | Everything through the phone |
+| Phone out of range | Watch falls back to direct HTTPS with a narrow token; read + prompt only, no approvals |
+| School Wi-Fi is captive and the watch cannot join | Watch still reaches the phone over Bluetooth; degraded but working |
+| Neither | Offline queue: compose now, send when a link returns |
 
-Most sessions begin and end here. Variants:
+The watch must show which mode it is in. Silently degrading from "approvals
+work" to "approvals do not work" is the kind of lie this app must not tell.
 
-- **Activity**: count of threads currently moving, e.g. `3 ●`.
-- **Last settled**: the title of the thread that most recently stopped.
-- **Spend**: today's usage from `GET /workspace/analytics/daily-usage`, a number
-  that visibly moves through the day.
+## What the plugin API actually allows
 
-### 1. Now — the root list
+I read the real type definitions in an orb, and my earlier design badly
+underestimated them. The External API is read-only and exposes no run state,
+but a **plugin does**:
 
-Not "all threads". Ranked by *what changed*, moving first, then most recently
-settled, then quiet. Capped at ~10 rows, with an "open on iPhone" escape at the
-bottom.
+| Capability | API |
+| --- | --- |
+| Real agent state | `thread.state: Observable<'idle' \| 'running' \| 'awaiting-approval' \| 'error'>` |
+| **Approve / reject / modify tool calls** | `tool.call` handler returns `allow`, `reject-and-continue`, `modify`, or `synthesize` |
+| Stop a runaway turn | `thread.cancel()` |
+| Start new work | `Agent.createThread`, `getBuiltinAgent(mode)` |
+| Receive commands from outside | `amp.createWebhook(...)`, 30 s handler deadline |
+| Steer a busy thread | `appendUserMessage(msg, { steer: true })` |
 
-Each row is a dot, a serif title, and a repo plus elapsed time. The dot is
-filled for moving and hollow otherwise, so state survives greyscale always-on
-rendering and colour-blind vision rather than relying on the ember tint alone.
+`awaiting-approval` is the important one. **Approving a tool call from your
+wrist is the feature that makes this worth building**, and it is the thing that
+most often blocks an agent while you are away from the keyboard.
 
-Activity **rolls up from subthreads**: a parent whose child thread is moving
-reads as moving, because that is what is true for the user.
+Checked in at `.amp/plugins/`, the bridge loads automatically in every orb
+thread for that project — no per-thread setup.
 
-### 2. Thread — newest message first
+### The one hard constraint
 
-A deliberate inversion of the web app. You raise your wrist to see *what just
-happened*, not to read a conversation from the top.
+Webhook handlers get **30 seconds**, then they are aborted and retried. So the
+webhook cannot block waiting for you to approve something. The flow inverts:
 
-Aggressive collapsing, because the glance is the product:
+```diagram
+tool.call fires
+   └─▶ plugin reports "awaiting approval" upstream, then awaits a promise
+                                   │
+   watch shows it ◀────────────────┘
+        │
+   you tap Approve
+        │
+        └─▶ phone POSTs the webhook (returns in milliseconds)
+                 └─▶ handler resolves the pending promise
+                          └─▶ tool.call returns { action: 'allow' }
+```
 
-- Tool calls collapse to one line — `ran 3 tools`.
-- Code blocks collapse to a label — ` ```swift · 24 lines `. Code is
-  unreadable at 40mm and pushes the answer off-screen.
-- Only text blocks render.
+**Unknown:** how long a `tool.call` handler may stay pending before Amp gives
+up. Not documented. This is the single biggest technical risk in the plan and
+gets measured first in M3. If the ceiling is short, approvals degrade to
+"approve the next tool call of this kind", decided in advance.
 
-### 3. Reply — dictation first
+## Features, by whether they keep you in control
 
-A large mic target, plus preset chips for the three things anyone actually says
-from a wrist: **Continue**, **Stop**, **Explain**. Scribble as fallback.
+**Tier 1 — without these, "control" is a lie**
 
-The UI says "queued", never "sent": the write path is fire-and-forget (see
-below), so claiming delivery would be a lie.
+- Thread list with **real** state, including a count of threads blocked on you
+- Read the transcript, newest first
+- Send a prompt / steer a running thread
+- **Approve, reject, or modify a pending tool call**
+- Cancel the current turn
 
-### 4. Cost — secondary
+**Tier 2 — the difference between coping and working**
 
-Thread spend with a per-model breakdown, reachable from a thread. Demoted from
-top level: spend is an anxiety, not an interrupt.
+- Start a thread from a saved template (repo + agent mode + opening prompt)
+- Switch agent mode on a thread
+- Budget guard: warn, then auto-cancel, past a per-thread dollar cap
+- **Offline draft queue** — compose while disconnected, deliver in order, once,
+  when a link returns
 
-### 5. Handoff
+**Tier 3 — ambient**
 
-`NSUserActivity` carrying the `ampcode.com/threads/T-…` URL, so the decision
-"I need to actually deal with this" costs one gesture. The watch's real job is
-to help you decide *whether* to engage; handoff is how it gets out of the way.
+- Complication variants: threads running · **threads awaiting you** · today's spend
+- Crown-scrollable overview of everything at once
+- Handoff to the laptop via `NSUserActivity`
 
-### 6. Notification
+### Input
 
-Local notification on settle, with actions that fire the webhook **without
-opening the app**: `Continue`, `Mute this thread`. Replying from the
-notification is the shortest possible loop and should be the common case.
+Dictation needs network, so it cannot be the only method. In order of expected
+use: **saved phrases** synced from the phone (the real speed win), Scribble,
+the watch keyboard, then dictation.
+
+## The approval screen is a security surface
+
+The watch can now approve shell commands. Judging a command you cannot fully
+read is worse than not having the feature.
+
+- Monospace, scrollable, **never truncated without saying so**
+- Destructive patterns (`rm -rf`, force push, `DROP TABLE`, credential paths)
+  flagged before you can approve
+- When the input does not fit, the default action is **Defer**, not Approve
+- No auto-approval, ever. No "approve all".
+- Approvals require the phone link. In fallback mode the button is absent, not
+  disabled-looking-clickable.
+
+## Alerts
+
+**v1 — no server.** The phone polls in the background and posts a local
+notification, which the system mirrors to your watch. Latency is minutes; iOS
+background refresh is opportunistic. Good enough for "it finished", too slow
+for "it is blocked on you".
+
+**v2 — direct APNs from the plugin.** You have a paid developer account, so
+APNs is available. The plugin in the orb can hold an APNs `.p8` key and POST a
+push itself the moment `state` becomes `awaiting-approval`, with no separate
+server anywhere. *To verify:* APNs requires HTTP/2, and whether the plugin
+runtime's `fetch` speaks HTTP/2 is unconfirmed. If not, a ~50-line Worker
+relays it.
+
+Notification actions (`Approve`, `Reject`, `Continue`) act without opening the
+app — the shortest possible loop and the expected common case.
 
 ## Architecture
 
 ```diagram
-┌────────────────┐   ┌──────────────────┐
-│ Complication   │   │ Background       │
-│ (buys refresh  │   │ refresh task     │
-│  budget)       │   └────────┬─────────┘
-└───────┬────────┘            │
-        └──────────┬──────────┘
-                   ▼
-         ┌───────────────────────┐
-         │ ThreadStore           │  observations + settle transitions
-         │ (small local file)    │  ← the only stateful piece
-         └───┬───────────────┬───┘
-             │               │
-   AmpClient │               │ AmpPromptSink
-   (read)    ▼               ▼ (write)
-   ┌──────────────┐   ┌────────────────┐
-   │ External API │   │ plugin webhook │
-   │ ampcode.com  │   │ in an orb      │
-   └──────────────┘   └────────────────┘
+        ┌────────────────┐        ┌──────────────────────────┐
+        │ Watch app      │        │ iPhone app               │
+        │  SwiftUI views │◀──WC──▶│  broker + Keychain       │
+        │  offline queue │        │  poller + notifications  │
+        └───────┬────────┘        └─────────┬────────────────┘
+                │                           │
+                └────── AmpKit ─────────────┘
+                   shared, platform-neutral:
+                   models · client · state machine · formatting
+                        │
+        ┌───────────────┴───────────────┐
+        ▼                               ▼
+  External API (read)            bridge plugin in orb
+                                 state · approvals · cancel · create
 ```
 
-`ThreadStore` is the only stateful component: a small persisted list of
-`(threadID, lastSeenUpdatedAt, lastNotifiedSettleAt)`. Not SwiftData — under a
-hundred rows does not justify a migration story on watchOS.
-
-Everything else derives. Activity, settle transitions, ranking and roll-up are
-all pure functions of observations plus a clock, which is why they live in
-`AmpKit` and are tested without a simulator.
-
-## Constraints that shaped the design
-
-These are verified against the public API, not assumed.
-
-| Constraint | Consequence |
-| --- | --- |
-| External API is **read-only** for threads | Writes go through an Amp plugin webhook |
-| Webhook handler returns `void` | No reply is ever visible to the watch; UI says "queued" |
-| Webhook: 10 events/min, burst 10 | Presets and dictation, not a chat client |
-| Archiving the webhook's owning thread → 404 | Onboarding must explain keeping that thread alive |
-| **No agent run state** over HTTP | Stall detection is derived from `updatedAt` deltas |
-| Message payloads explicitly unstable | Decode to `JSONValue`, extract defensively |
-| `title`/`repositories` need `threads.contents:view` | Both optional throughout |
-| `/threads` sorts by **first sync time**, not `updatedAt` | Must fetch a window and re-sort client-side; a long-lived thread that becomes active again can fall outside the window. Needs a window size chosen deliberately and revisited. |
-| No APNs without a paid account | v1 uses local notifications from background refresh |
-
-## The biggest open risk: credentials
-
-The External API authenticates **machine-to-machine OAuth clients** created at
-`ampcode.com/workspace/applications`. "Sign in with Amp" for third-party apps is
-documented as not generally available. That produces three problems:
-
-1. The credential is **workspace-scoped**. It can read every thread in the
-   workspace, not just yours. Filtering to `userID` client-side narrows the
-   *display*, not the *power* of the token.
-2. It is a **long-lived secret**, and putting one on a watch is bad practice.
-3. Typing or dictating it on a watch is not a plan.
-
-Three ways out, in increasing order of effort:
-
-- **A — companion paste (v1).** A minimal iOS app takes the credentials and
-  hands them to the watch over WatchConnectivity, into the Keychain. Acceptable
-  for a personal workspace. Loudly unacceptable for a shared one, and not
-  shippable to the App Store.
-- **B — plugin serves reads.** Rejected: webhooks return no body, and an orb
-  portal authenticates against a browser session, which a watch does not have.
-- **C — a user-hosted broker.** ~100 lines on a free Cloudflare Worker holding
-  the M2M secret, doing the token exchange, filtering to one user, and issuing
-  the watch a narrow device token. This is the correct answer and also removes
-  the dependency on an orb staying alive for writes.
-
-**Plan: ship A, document its blast radius in bold, build C before anyone in a
-shared workspace uses this.**
-
-## Distribution reality
-
-Worth stating before anyone is disappointed: with a free Apple ID a
-self-built watch app expires after **7 days** and must be re-signed. A paid
-account ($99/yr) gets a year. The App Store is effectively blocked while
-option A is the auth story. Realistic audience for v1 is "people who will run
-`xcodegen && xcodebuild` themselves".
+`AmpKit` stays the centre of gravity: it builds and tests on Linux, so the
+interesting logic — the approval state machine, the offline queue's
+exactly-once delivery, ranking, formatting — is verified in an orb without a
+Mac or a simulator. Views stay thin on purpose.
 
 ## Milestones
 
-Each milestone ends with CI screenshots as its acceptance artifact, so progress
-is reviewable without a Mac.
+Each ends with CI screenshots as its reviewable artifact.
 
 | # | Scope | Done when |
 | --- | --- | --- |
-| **M0** ✅ | Fixture-rendered UI, CI builds + screenshots on a watchOS simulator | Six screens captured as artifacts from a green run |
-| **M1** | Live read path; onboarding via iOS companion; real thread list | Real threads appear on a simulator with a real token; `threads.contents:view` absent still renders |
-| **M2** | `ThreadStore`, stall detection, complication, background refresh, local notifications | A thread that goes quiet notifies **exactly once**; resuming and settling again notifies again |
-| **M3** | Write path: bridge plugin, dictation, notification actions | A dictated prompt appears in a real thread; a 429 surfaces as a retry hint, not a lie |
-| **M4** | Handoff, cost, VoiceOver, always-on rendering | Screenshots pass in greyscale/always-on; every element has a label |
-| **M5** | APNs push | Blocked on a paid account — explicitly out of scope until then |
+| **M0** ✅ | Fixture UI, CI builds + screenshots on a watchOS simulator | Done |
+| **M1** | **Connectivity truth** | In your actual classroom: does the watch reach the phone next door, over what, and how fast. Everything downstream assumes this |
+| **M2** | Phone broker + real reads | Watch shows your real threads, with credentials only on the phone |
+| **M3** | Bridge plugin + **approvals** | Approve a real tool call from the watch; the pending-handler ceiling is **measured** and documented; timeout auto-rejects with a stated reason |
+| **M4** | Tier 2 + offline queue | Three prompts written in airplane mode arrive in order, exactly once |
+| **M5** | Alerts | Local-notification path working; APNs-from-plugin spike resolved either way |
+| **M6** | Battery + polish | Measured drain across a real school day; VoiceOver; always-on rendering |
 
-M0 exists specifically so the verification loop is proven *before* features are
-built on top of it. Nothing after M0 is worth starting if an agent cannot see
-what it changed.
+M1 is first because it is the only one that can invalidate the rest.
 
 ## What "correct" means
 
-The interesting bugs here are not crashes, they are **lies**: the app claiming
-something happened that did not. The tests target those:
+The dangerous bugs here are **lies**, not crashes:
 
-- A settle fires once, not once per poll, and can fire again after a resume.
-- A thread with a future `updatedAt` (clock skew) is not reported as stalled.
-- A tool-only message renders as "tool activity", not as an empty bubble.
-- A queued prompt says "queued", and a 429 does not render as success.
-- Unknown fields in a message payload do not drop the message.
+- An approval that says it went through when the handler had already timed out
+- A queued prompt delivered twice after a reconnect
+- The approval button visible while the phone link is down
+- A truncated command presented as if it were complete
+- A stale `idle` shown while the thread is actually blocked on you
+
+Each gets a test in `AmpKit`, where it runs without a simulator.
+
+## Open questions for you
+
+1. **Watch model?** Series 5 and SE are 2.4 GHz only, which matters for school
+   Wi-Fi. Cellular would remove the dependence on the phone entirely.
+2. **School Wi-Fi: does it have a login page?** Apple Watch cannot join captive
+   networks at all. If it does, the watch reaches the phone by Bluetooth only —
+   which is likely fine at one room's distance, but changes M1's result. Your
+   laptop's hotspot is a good fallback since it is not captive.
+3. **Why the watch and not the laptop you always have?** I am assuming
+   discretion — that a wrist glance is acceptable in a room where a laptop is
+   not. If the real reason is different, the whole priority order changes.
 
 ## Non-goals
 
-- Reading or editing code, viewing diffs, approving tool calls.
-- A full thread list, search, or history browsing — that is the phone's job.
-- Starting new threads from the watch. Choosing a project and repo is a
-  keyboard task, and the API cannot create threads anyway.
-- Anything requiring the watch to be a trusted holder of workspace secrets
-  beyond what option A already concedes.
+- Reading or writing code, viewing diffs. The laptop is always with you.
+- Browsing history or search. That is the phone's job.
+- Holding workspace-wide credentials on the watch in normal operation.
