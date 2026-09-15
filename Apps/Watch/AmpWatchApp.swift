@@ -123,8 +123,15 @@ struct RootView: View {
             reload: {
                 session = Self.load(secrets)
                 generation += 1
-            }
+            },
+            speech: Self.speech(secrets)
         )
+    }
+
+    private static func speech(_ secrets: any SecretStore) -> (any SpeechTranscriber)? {
+        guard let key = try? secrets.read(.elevenLabsAPIKey),
+              !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return ElevenLabsTranscriber(apiKey: key, transport: URLSessionTransport.watchDefault(timeout: 60))
     }
 
     private static func load(_ secrets: any SecretStore) -> AmpSession {
@@ -160,6 +167,11 @@ enum ScreenshotScene: String, CaseIterable {
     case templates
     case glance
     case glanceSpend = "glance-spend"
+    case speechSettings = "speech-settings"
+    case cloudSpeech = "cloud-speech"
+    case cloudSpeechReady = "cloud-speech-ready"
+    case cloudSpeechBusy = "cloud-speech-busy"
+    case cloudSpeechError = "cloud-speech-error"
 
     static let launchArgument = "-ampwatch-screen"
 
@@ -176,6 +188,7 @@ enum ScreenshotScene: String, CaseIterable {
         case .threadsEmpty: .fixture(behavior: .empty)
         case .threadsError: .fixture(behavior: .failing(.unauthorized))
         case .setup: .fixture(secrets: InMemorySecretStore())
+        case .cloudSpeechReady, .cloudSpeechBusy, .cloudSpeechError: .fixture(speech: ScreenshotSpeech())
         case .threadsQueued: .fixture(queued: [
             .prompt(threadID: Fixtures.threads()[0].id, text: "Continue", steer: true),
             .cancel(threadID: Fixtures.threads()[1].id),
@@ -227,8 +240,19 @@ enum ScreenshotScene: String, CaseIterable {
             NavigationStack { GlanceGalleryView(kind: .awaiting) }.tint(AmpTheme.ember)
         case .glanceSpend:
             NavigationStack { GlanceGalleryView(kind: .spend) }.tint(AmpTheme.ember)
+        case .speechSettings:
+            NavigationStack { SpeechSettingsView() }.tint(AmpTheme.ember)
+        case .cloudSpeech, .cloudSpeechReady, .cloudSpeechBusy, .cloudSpeechError:
+            NavigationStack {
+                CloudSpeechView(text: .constant(""), busy: self == .cloudSpeechBusy,
+                    problem: self == .cloudSpeechError ? WatchStrings.text("No speech was recognized. Try again.") : nil)
+            }.tint(AmpTheme.ember)
         }
     }
+}
+
+private struct ScreenshotSpeech: SpeechTranscriber {
+    func transcribe(audio: Data) async throws -> String { "Run the tests" }
 }
 
 #Preview("Threads") {

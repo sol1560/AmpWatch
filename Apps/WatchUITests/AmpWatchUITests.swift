@@ -34,6 +34,27 @@ final class AmpWatchUITests: XCTestCase {
         XCTAssertEqual(fallback.buttons["dictation-button"].label, "Voice input")
     }
 
+    func testCloudRecordingRequiresKeyAndCannotRepeatWhileBusy() {
+        let missing = launch(screen: "cloud-speech", language: "zh-Hans")
+        XCTAssertTrue(missing.staticTexts["speech-needs-key"].waitForExistence(timeout: 20))
+        missing.swipeUp()
+        XCTAssertTrue(missing.buttons["cloud-record-button"].exists)
+        XCTAssertFalse(missing.buttons["cloud-record-button"].isEnabled)
+        missing.terminate()
+        let busy = launch(screen: "cloud-speech-busy")
+        XCTAssertTrue(busy.descendants(matching: .any)["speech-progress"].waitForExistence(timeout: 20))
+        busy.swipeUp()
+        XCTAssertFalse(busy.buttons["cloud-record-button"].isEnabled)
+    }
+
+    func testCloudFailureExplainsRecoveryAndAllowsRecordingAgain() {
+        let app = launch(screen: "cloud-speech-error")
+        XCTAssertTrue(app.staticTexts["speech-error"].waitForExistence(timeout: 20))
+        XCTAssertEqual(app.staticTexts["speech-error"].label, "No speech was recognized. Try again.")
+        app.swipeUp()
+        XCTAssertTrue(app.buttons["cloud-record-button"].isEnabled)
+    }
+
     func testThreadListShowsFirstAndLastFixtureThread() {
         let app = launch(screen: "threads")
         let list = app.descendants(matching: .any)["thread-list"]

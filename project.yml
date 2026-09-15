@@ -47,6 +47,7 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: Amp
         INFOPLIST_KEY_WKApplication: "YES"
         INFOPLIST_KEY_WKWatchOnly: "YES"
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: Record speech you choose to send to ElevenLabs for transcription.
         ENABLE_PREVIEWS: "YES"
         # Pushes. Xcode flips this to `production` for App Store builds.
         CODE_SIGN_ENTITLEMENTS: Apps/Watch/AmpWatch.entitlements

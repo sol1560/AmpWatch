@@ -80,6 +80,32 @@ at-least-once delivery — not that the agent read it. The compose screen says
 
 ## Build it
 
+### Language and voice input
+
+The interface follows the watch's preferred language: English and Simplified
+Chinese are included; unsupported languages fall back to English. Your thread
+contents, saved phrases, and templates are not translated.
+
+Reply and New thread offer system voice input, with availability depending on
+the watch's language and dictation settings. Choose the microphone in the
+system input panel, then review the draft and tap Send yourself.
+
+For optional ElevenLabs transcription, open Settings → Voice settings and
+save your own ElevenLabs API key. It stays in the watch's Keychain and can be
+removed on that screen or by signing out. Choose ElevenLabs transcription
+from Reply or New thread, read the upload notice, record up to 60 seconds,
+and confirm Transcribe. Audio goes directly to ElevenLabs `scribe_v2`, using
+your account's quota and their data-retention policies. There is no cloud
+upload for the system input option through this app. Cloud recordings are
+deleted locally after success, cancellation, or failure; failed uploads are
+not queued or automatically retried. Transcribed text is appended to the
+draft and never automatically sent to Amp. Whisper is not integrated.
+
+CI uses fixtures, not a paid transcription account. Real microphone access,
+recognition quality, and school Wi-Fi connectivity must still be checked on
+a watch with an actual key. Test cancellation, mixed Chinese/English speech,
+denied microphone access, and loss of connectivity before relying on it.
+
 ```bash
 brew install xcodegen xcbeautify
 xcodegen generate

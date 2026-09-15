@@ -26,6 +26,7 @@ struct AmpEnvironment: Sendable {
     var secrets: any SecretStore
     var now: @Sendable () -> Date
     var reload: @MainActor () -> Void
+    var speech: (any SpeechTranscriber)? = nil
 
     /// Queues `command` and tries to send it. `nil` means there is no bridge
     /// to send to at all, which the caller should say out loud.
@@ -49,7 +50,8 @@ struct AmpEnvironment: Sendable {
         behavior: FixtureAmpClient.Behavior = .ok,
         secrets: any SecretStore = InMemorySecretStore(Fixtures.secrets),
         preferences: WatchPreferences = .defaults,
-        queued: [WatchCommand] = []
+        queued: [WatchCommand] = [],
+        speech: (any SpeechTranscriber)? = nil
     ) -> AmpEnvironment {
         let fixture = FixtureAmpClient(behavior: behavior)
         // Queued items stay queued: the sink they would drain into is offline.
@@ -67,7 +69,8 @@ struct AmpEnvironment: Sendable {
             preferences: .inMemory(preferences),
             secrets: secrets,
             now: { Fixtures.referenceDate },
-            reload: {}
+            reload: {},
+            speech: speech
         )
     }
 }

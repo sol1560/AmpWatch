@@ -104,6 +104,13 @@ struct SettingsView: View {
                 .pickerStyle(.navigationLink)
                 .onChange(of: preferences.budgetCapUSD) { _, _ in amp.preferences.save(preferences) }
                 .accessibilityIdentifier("budget-picker")
+
+                NavigationLink {
+                    SpeechSettingsView()
+                } label: {
+                    Label("Voice settings", systemImage: "mic")
+                }
+                .accessibilityIdentifier("speech-settings-link")
             }
             .font(AmpTheme.body(13))
             .listRowBackground(Color.clear)

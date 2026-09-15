@@ -33,5 +33,13 @@ struct DictationButton: View {
         } message: {
             Text("Tap the prompt field to use system dictation.")
         }
+
+        NavigationLink {
+            CloudSpeechView(text: $text)
+        } label: {
+            Text("ElevenLabs transcription")
+                .font(AmpTheme.body(11))
+        }
+        .accessibilityIdentifier("cloud-speech-link")
     }
 }

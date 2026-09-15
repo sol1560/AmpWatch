@@ -7,6 +7,7 @@ public enum SecretKey: String, CaseIterable, Sendable {
     case accessToken = "access-token"
     case webhookURL = "webhook-url"
     case deviceToken = "device-token"
+    case elevenLabsAPIKey = "elevenlabs-api-key"
 }
 
 /// Where secrets live. The watch app backs this with the Keychain; tests and
