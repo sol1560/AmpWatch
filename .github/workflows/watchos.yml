@@ -66,6 +66,8 @@ jobs:
             | xcbeautify
 
       - name: Capture a screenshot of every screen
+        # A failing UI test is exactly when the pictures matter most.
+        if: always() && steps.sim.outputs.udid != ''
         run: |
           app=$(find .build/DerivedData/Build/Products -name 'AmpWatch.app' -maxdepth 3 | head -1)
           test -n "$app" || { echo "AmpWatch.app not found"; exit 1; }

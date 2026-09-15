@@ -18,10 +18,22 @@ final class AmpWatchUITests: XCTestCase {
         return app
     }
 
-    func testThreadListShowsOneRowPerFixtureThread() {
+    func testThreadListShowsFirstAndLastFixtureThread() {
         let app = launch(screen: "threads")
-        XCTAssertTrue(app.descendants(matching: .any)["thread-list"].waitForExistence(timeout: 20))
-        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "thread-row").count, 4)
+        let list = app.descendants(matching: .any)["thread-list"]
+        XCTAssertTrue(list.waitForExistence(timeout: 20))
+
+        // `List` only materialises rows that fit on screen, so counting rows
+        // measures the watch size, not the data. Check the ends instead: the
+        // first fixture thread is visible at rest, and the untitled fourth one
+        // (rendered by its ID prefix) appears after scrolling.
+        let rows = app.descendants(matching: .any).matching(identifier: "thread-row")
+        XCTAssertTrue(rows.element(boundBy: 0).label.contains("Fix the flaky watchOS simulator boot"))
+
+        list.swipeUp()
+        list.swipeUp()
+        let last = rows.containing(NSPredicate(format: "label CONTAINS %@", "T-77c3ba91")).firstMatch
+        XCTAssertTrue(last.waitForExistence(timeout: 5))
     }
 
     func testEmptyStateIsReachableAndNotJustAnEmptyList() {
