@@ -128,8 +128,8 @@ final class OutboxStatus: @unchecked Sendable {
 
     static func note(for drop: OutboxDrop) -> String {
         switch drop {
-        case .expired: "an approval was too late and was not sent"
-        case .exhausted: "a message gave up after \(Outbox.maxAttempts) tries"
+        case .expired: WatchStrings.text("outbox.expired")
+        case .exhausted: WatchStrings.format("outbox.exhausted", Outbox.maxAttempts)
         }
     }
 }

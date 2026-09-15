@@ -25,7 +25,7 @@ struct UsageView: View {
         Group {
             switch model.state {
             case .loading:
-                LoadingView(label: "Cost")
+                LoadingView(label: WatchStrings.text("Cost"))
             case let .failed(error):
                 ErrorView(error: error) { await model.load(threadID: thread.id, from: amp) }
             case let .loaded(usage):
@@ -47,8 +47,8 @@ struct UsageView: View {
                     .accessibilityIdentifier("total-cost")
 
                 Text(usage.subThreadIDs.isEmpty
-                     ? "this thread"
-                     : "incl. \(usage.subThreadIDs.count) subthreads")
+                     ? WatchStrings.text("this thread")
+                     : WatchStrings.format("incl. %d subthreads", usage.subThreadIDs.count))
                     .font(AmpTheme.body(11))
                     .foregroundStyle(AmpTheme.parchmentDim)
 
@@ -67,7 +67,7 @@ struct UsageView: View {
                                 .font(AmpTheme.body(13, weight: .medium))
                                 .foregroundStyle(AmpTheme.ember)
                         }
-                        Text("\(TokenCount.compact(model.inputTokens)) in · \(TokenCount.compact(model.outputTokens)) out")
+                        Text(WatchStrings.format("%@ in · %@ out", TokenCount.compact(model.inputTokens), TokenCount.compact(model.outputTokens)))
                             .font(AmpTheme.body(10))
                             .foregroundStyle(AmpTheme.parchmentDim)
                     }

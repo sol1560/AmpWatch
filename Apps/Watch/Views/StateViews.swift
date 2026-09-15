@@ -65,20 +65,20 @@ struct ErrorView: View {
     private var detail: String {
         switch error {
         case .unauthorized:
-            "The API token was rejected. Open Settings and enter a new one."
+            WatchStrings.text("error.unauthorized.detail")
         case .forbidden:
-            "This token cannot read thread contents. Add the threads.contents:view scope."
+            WatchStrings.text("error.forbidden.detail")
         case .notFound:
-            "That thread is gone."
+            WatchStrings.text("error.not_found.detail")
         case let .rateLimited(retryAfter):
-            retryAfter.map { "Too many requests. Try again in \(Int($0))s." }
-                ?? "Too many requests."
+            retryAfter.map { WatchStrings.format("error.rate_limited.retry", Int($0)) }
+                ?? WatchStrings.text("error.rate_limited.detail")
         case .server:
-            "Amp had a problem. Try again."
+            WatchStrings.text("error.server.detail")
         case .transport:
-            "The watch could not reach ampcode.com."
+            WatchStrings.text("error.transport.detail")
         case .decoding:
-            "Amp sent something this build does not understand."
+            WatchStrings.text("error.decoding.detail")
         }
     }
 }

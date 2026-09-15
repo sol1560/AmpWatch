@@ -43,7 +43,7 @@ final class PushRegistrar: NSObject, WKApplicationDelegate, UNUserNotificationCe
                 if granted {
                     WKApplication.shared().registerForRemoteNotifications()
                 } else {
-                    registrationProblem = "Notifications are off for Amp in the Watch app."
+                    registrationProblem = WatchStrings.text("Notifications are off for Amp in the Watch app.")
                 }
             } catch {
                 registrationProblem = error.localizedDescription

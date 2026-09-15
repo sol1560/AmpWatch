@@ -29,7 +29,7 @@ final class NewThreadModel {
         guard !text.isEmpty else { return }
         status = .sending
         guard let outcome = await environment.deliver(.create(prompt: text, mode: mode)) else {
-            status = .failed("No bridge configured")
+            status = .failed(WatchStrings.text("No bridge configured"))
             return
         }
         switch outcome {
@@ -79,9 +79,12 @@ struct NewThreadView: View {
                     .font(AmpTheme.body(14))
                     .accessibilityIdentifier("new-thread-prompt")
 
+                DictationButton(text: $model.prompt)
+                    .disabled(model.status == .sending)
+
                 Picker(selection: $model.mode) {
                     ForEach(AgentMode.allCases, id: \.self) { mode in
-                        Text(mode.rawValue).tag(mode)
+                        Text(mode.label).tag(mode)
                     }
                 } label: {
                     Label("Mode", systemImage: "gauge.with.dots.needle.33percent")

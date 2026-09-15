@@ -1,20 +1,43 @@
 import Foundation
 
+/// Localized product copy owned by AmpKit. Server and user supplied text must
+/// never pass through this helper.
+public enum AmpStrings {
+    public static func text(_ key: String, localeIdentifier: String? = nil) -> String {
+        let bundle: Bundle
+        if let localeIdentifier {
+            let directory = "\(localeIdentifier.lowercased()).lproj"
+            if let localized = Bundle(url: Bundle.module.bundleURL.appendingPathComponent(directory)) {
+                bundle = localized
+            } else {
+                bundle = .module
+            }
+        } else {
+            bundle = .module
+        }
+        return NSLocalizedString(key, bundle: bundle, comment: "")
+    }
+
+    public static func format(_ key: String, _ arguments: CVarArg...) -> String {
+        String(format: text(key), locale: Locale.current, arguments: arguments)
+    }
+}
+
 /// Compact relative timestamps sized for a watch row: at most three characters
 /// plus a unit, never a sentence.
 public enum RelativeTime {
     public static func short(from date: Date?, to now: Date) -> String {
         guard let date else { return "—" }
         let seconds = now.timeIntervalSince(date)
-        if seconds < 0 { return "now" }
-        if seconds < 60 { return "\(Int(seconds))s" }
+        if seconds < 0 { return AmpStrings.text("relative.now") }
+        if seconds < 60 { return AmpStrings.format("relative.seconds", Int(seconds)) }
         let minutes = seconds / 60
-        if minutes < 60 { return "\(Int(minutes))m" }
+        if minutes < 60 { return AmpStrings.format("relative.minutes", Int(minutes)) }
         let hours = minutes / 60
-        if hours < 24 { return "\(Int(hours))h" }
+        if hours < 24 { return AmpStrings.format("relative.hours", Int(hours)) }
         let days = hours / 24
-        if days < 7 { return "\(Int(days))d" }
-        return "\(Int(days / 7))w"
+        if days < 7 { return AmpStrings.format("relative.days", Int(days)) }
+        return AmpStrings.format("relative.weeks", Int(days / 7))
     }
 }
 

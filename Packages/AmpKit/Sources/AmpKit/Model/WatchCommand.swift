@@ -3,6 +3,8 @@ import Foundation
 /// The built-in Amp agent modes a new thread can start in.
 public enum AgentMode: String, Sendable, Codable, CaseIterable {
     case low, medium, high, ultra
+
+    public var label: String { AmpStrings.text("mode.\(rawValue)") }
 }
 
 /// Which APNs gateway can reach this build. Xcode installs talk to the
@@ -24,9 +26,9 @@ public enum ArmLevel: String, Sendable, Codable, CaseIterable {
     /// Plain words for a picker row.
     public var label: String {
         switch self {
-        case .off: "never"
-        case .risky: "risky commands"
-        case .all: "every command"
+        case .off: AmpStrings.text("arm.never")
+        case .risky: AmpStrings.text("arm.risky")
+        case .all: AmpStrings.text("arm.every")
         }
     }
 }

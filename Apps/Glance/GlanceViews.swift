@@ -2,6 +2,14 @@ import SwiftUI
 import WidgetKit
 import AmpKit
 
+private func glanceText(_ key: String) -> String {
+    NSLocalizedString(key, bundle: .main, comment: "")
+}
+
+private func glanceFormat(_ key: String, _ arguments: CVarArg...) -> String {
+    String(format: glanceText(key), locale: Locale.current, arguments: arguments)
+}
+
 // Compiled into both the app and the widget extension: the widget renders
 // these on the face, the app renders them in the `glance` screenshot scene so
 // CI can show what the face will look like. Nothing here touches AmpTheme —
@@ -72,8 +80,8 @@ struct GlanceView: View {
     private var bigCaption: String {
         guard let glance, !stale else { return "amp" }
         switch kind {
-        case .awaiting: return glance.awaiting > 0 ? "held" : "live"
-        case .spend: return "today"
+        case .awaiting: return glance.awaiting > 0 ? glanceText("held") : glanceText("live")
+        case .spend: return glanceText("today")
         }
     }
 
@@ -99,28 +107,28 @@ struct GlanceView: View {
         guard let glance, !stale else { return "Amp" }
         switch kind {
         case .awaiting:
-            return glance.awaiting > 0 ? "\(glance.awaiting) waiting on you" : "\(glance.live) moving"
+            return glance.awaiting > 0 ? glanceFormat("%d waiting on you", glance.awaiting) : glanceFormat("%d moving", glance.live)
         case .spend:
-            return "\(Money.compact(usd: glance.spentTodayUSD)) today"
+            return glanceFormat("%@ today", Money.compact(usd: glance.spentTodayUSD))
         }
     }
 
     private var detail: String {
-        guard let glance, !stale else { return "Open to refresh" }
+        guard let glance, !stale else { return glanceText("Open to refresh") }
         switch kind {
         case .awaiting:
-            return glance.headline ?? "Nothing moving"
+            return glance.headline ?? glanceText("Nothing moving")
         case .spend:
-            return glance.spentTodayThreads == 1 ? "1 thread" : "\(glance.spentTodayThreads) threads"
+            return glanceFormat(glance.spentTodayThreads == 1 ? "%d thread" : "%d threads", glance.spentTodayThreads)
         }
     }
 
     private var footer: String {
         guard let glance, !stale else { return "" }
         if kind == .awaiting, glance.awaiting > 0 {
-            return "\(glance.live) moving · \(RelativeTime.short(from: glance.updatedAt, to: now))"
+            return glanceFormat("%d moving · %@", glance.live, RelativeTime.short(from: glance.updatedAt, to: now))
         }
-        return "as of \(RelativeTime.short(from: glance.updatedAt, to: now)) ago"
+        return glanceFormat("as of %@ ago", RelativeTime.short(from: glance.updatedAt, to: now))
     }
 
     // MARK: Inline — one sentence
@@ -133,26 +141,26 @@ struct GlanceView: View {
     /// Inline gets one short line next to the time; the full sentence is
     /// what VoiceOver reads.
     private var inlineText: String {
-        guard let glance, !stale else { return "Amp: open to refresh" }
+        guard let glance, !stale else { return glanceText("Amp: open to refresh") }
         switch kind {
         case .awaiting:
-            return glance.awaiting > 0 ? "\(glance.awaiting) held · \(glance.live) moving" : "\(glance.live) moving"
+            return glance.awaiting > 0 ? glanceFormat("%d held · %d moving", glance.awaiting, glance.live) : glanceFormat("%d moving", glance.live)
         case .spend:
-            return "\(Money.compact(usd: glance.spentTodayUSD)) today"
+            return glanceFormat("%@ today", Money.compact(usd: glance.spentTodayUSD))
         }
     }
 
     /// Doubles as the VoiceOver label for every family.
     private var spokenSummary: String {
-        guard let glance, !stale else { return "Amp: open to refresh" }
+        guard let glance, !stale else { return glanceText("Amp: open to refresh") }
         switch kind {
         case .awaiting:
             if glance.awaiting > 0 {
-                return "Amp: \(glance.awaiting) waiting on you, \(glance.live) moving"
+                return glanceFormat("Amp: %d waiting on you, %d moving", glance.awaiting, glance.live)
             }
-            return "Amp: \(glance.live) moving"
+            return glanceFormat("Amp: %d moving", glance.live)
         case .spend:
-            return "Amp: \(Money.compact(usd: glance.spentTodayUSD)) today"
+            return glanceFormat("Amp: %@ today", Money.compact(usd: glance.spentTodayUSD))
         }
     }
 

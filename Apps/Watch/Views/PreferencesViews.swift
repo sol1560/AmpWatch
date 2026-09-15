@@ -21,7 +21,7 @@ struct PhrasesView: View {
                     .accessibilityIdentifier("phrase-field")
                     .onSubmit(add)
             } footer: {
-                Text("Up to \(WatchPreferences.maxPhraseLength) characters. Longer thoughts are better dictated on the Reply screen.")
+                Text(WatchStrings.format("Up to %d characters. Longer thoughts are better dictated on the Reply screen.", WatchPreferences.maxPhraseLength))
                     .font(AmpTheme.body(11))
                     .foregroundStyle(AmpTheme.parchmentDim)
             }
@@ -41,7 +41,7 @@ struct PhrasesView: View {
                     amp.preferences.save(preferences)
                 }
             } header: {
-                Text(preferences.phrases.isEmpty ? "No phrases yet" : "Swipe left to remove")
+                Text(WatchStrings.text(preferences.phrases.isEmpty ? "No phrases yet" : "Swipe left to remove"))
                     .font(AmpTheme.body(11))
                     .foregroundStyle(AmpTheme.parchmentDim)
             }
@@ -79,7 +79,7 @@ struct TemplatesView: View {
                 TextField("Prompt", text: $prompt, axis: .vertical)
                     .accessibilityIdentifier("template-prompt-field")
                 Picker("Mode", selection: $mode) {
-                    ForEach(AgentMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                    ForEach(AgentMode.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
                 .pickerStyle(.navigationLink)
                 Button {
@@ -103,7 +103,7 @@ struct TemplatesView: View {
                                 .font(AmpTheme.body(14, weight: .medium))
                                 .foregroundStyle(AmpTheme.parchment)
                             Spacer()
-                            Text(template.mode.rawValue)
+                            Text(template.mode.label)
                                 .font(AmpTheme.body(11))
                                 .foregroundStyle(AmpTheme.ember)
                         }
@@ -123,7 +123,7 @@ struct TemplatesView: View {
                     amp.preferences.save(preferences)
                 }
             } header: {
-                Text(preferences.templates.isEmpty ? "No templates yet" : "Swipe left to remove")
+                Text(WatchStrings.text(preferences.templates.isEmpty ? "No templates yet" : "Swipe left to remove"))
                     .font(AmpTheme.body(11))
                     .foregroundStyle(AmpTheme.parchmentDim)
             }

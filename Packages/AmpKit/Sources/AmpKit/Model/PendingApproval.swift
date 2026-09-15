@@ -113,7 +113,7 @@ extension PendingApproval {
         var seen = Set<String>()
         return Self.destructivePatterns.compactMap { pattern, label in
             guard haystack.contains(pattern), seen.insert(label).inserted else { return nil }
-            return DestructiveSignal(label: label, match: pattern)
+            return DestructiveSignal(label: AmpStrings.text("destructive.\(label)"), match: pattern)
         }
     }
 
@@ -126,10 +126,10 @@ extension PendingApproval {
     public func recommendation(now: Date) -> Recommendation {
         guard !isExpired(now: now) else { return .expired }
         guard inputIsComplete else {
-            return .deferToLargerScreen(reason: "The command was truncated before it reached the watch.")
+            return .deferToLargerScreen(reason: AmpStrings.text("approval.truncated"))
         }
         guard input.count <= Self.maxReadableInputLength else {
-            return .deferToLargerScreen(reason: "This command is too long to read here.")
+            return .deferToLargerScreen(reason: AmpStrings.text("approval.too_long"))
         }
         let signals = destructiveSignals
         return signals.isEmpty ? .decide : .warn(signals)

@@ -60,7 +60,7 @@ struct SetupView: View {
             try amp.secrets.write(token, for: .accessToken)
             amp.reload()
         } catch {
-            problem = "Could not save to the Keychain."
+            problem = WatchStrings.text("Could not save to the Keychain.")
         }
     }
 }
@@ -109,15 +109,15 @@ struct SettingsView: View {
             .listRowBackground(Color.clear)
 
             secretRow(
-                title: "API token",
+                title: WatchStrings.text("API token"),
                 value: tokenSummary,
-                placeholder: "New token",
+                placeholder: WatchStrings.text("New token"),
                 text: $newToken,
                 identifier: "token"
             ) { try amp.secrets.write($0, for: .accessToken) }
 
             secretRow(
-                title: "Bridge URL",
+                title: WatchStrings.text("Bridge URL"),
                 value: webhookSummary,
                 placeholder: "https://…",
                 text: $newWebhookURL,
@@ -153,11 +153,11 @@ struct SettingsView: View {
     }
 
     private var tokenSummary: String {
-        ((try? amp.secrets.read(.accessToken)) ?? nil).map { SecretDisplay.masked($0) } ?? "not set"
+        ((try? amp.secrets.read(.accessToken)) ?? nil).map { SecretDisplay.masked($0) } ?? WatchStrings.text("not set")
     }
 
     private var webhookSummary: String {
-        AmpSession.webhookURL(from: amp.secrets).map(SecretDisplay.maskedURL) ?? "not set"
+        AmpSession.webhookURL(from: amp.secrets).map(SecretDisplay.maskedURL) ?? WatchStrings.text("not set")
     }
 
     private func secretRow(
@@ -195,7 +195,7 @@ struct SettingsView: View {
                         problem = nil
                         amp.reload()
                     } catch {
-                        problem = "Could not save to the Keychain."
+                        problem = WatchStrings.text("Could not save to the Keychain.")
                     }
                 }
         }

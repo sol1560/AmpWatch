@@ -29,7 +29,7 @@ final class ThreadDetailModel {
         // pick for the same thread (`Outbox.supersedes`). Each pick keeps its
         // own id, so a retry of the old one cannot be mistaken for the new.
         guard let outcome = await environment.deliver(.arm(threadID: threadID, level: level)) else {
-            armStatus = .failed("No bridge configured")
+            armStatus = .failed(WatchStrings.text("No bridge configured"))
             return
         }
         switch outcome {
@@ -42,7 +42,7 @@ final class ThreadDetailModel {
     func cancel(threadID: String, using environment: AmpEnvironment) async {
         cancelStatus = .sending
         guard let outcome = await environment.deliver(.cancel(threadID: threadID)) else {
-            cancelStatus = .failed("No bridge configured")
+            cancelStatus = .failed(WatchStrings.text("No bridge configured"))
             return
         }
         switch outcome {
@@ -81,7 +81,10 @@ struct ThreadDetailView: View {
             case let .failed(error):
                 ErrorView(error: error) { await model.load(threadID: thread.id, from: amp) }
             case let .loaded(messages) where messages.isEmpty:
-                EmptyStateView(headline: "No messages", detail: "This thread has not started yet.")
+                EmptyStateView(
+                    headline: WatchStrings.text("No messages"),
+                    detail: WatchStrings.text("This thread has not started yet.")
+                )
             case let .loaded(messages):
                 transcript(messages)
             }
@@ -281,9 +284,9 @@ struct MessageView: View {
 
     private var speaker: String {
         switch message.role {
-        case .user: "you"
+        case .user: WatchStrings.text("you")
         case .assistant: "amp"
-        case .system: "system"
+        case .system: WatchStrings.text("system")
         case .unknown: "—"
         }
     }
@@ -313,17 +316,17 @@ struct BudgetBadge: View {
     private var spoken: String {
         let amount = Money.compact(usd: usageUSD)
         switch standing {
-        case .fine: return "spent \(amount)"
-        case .near: return "spent \(amount), near cap"
-        case .over: return "spent \(amount), over cap"
+        case .fine: return WatchStrings.format("spent %@", amount)
+        case .near: return WatchStrings.format("spent %@, near cap", amount)
+        case .over: return WatchStrings.format("spent %@, over cap", amount)
         }
     }
 
     private var text: String {
         switch standing {
         case .fine: Money.compact(usd: usageUSD)
-        case .near: "\(Money.compact(usd: usageUSD)) near cap"
-        case .over: "\(Money.compact(usd: usageUSD)) over cap"
+        case .near: WatchStrings.format("%@ near cap", Money.compact(usd: usageUSD))
+        case .over: WatchStrings.format("%@ over cap", Money.compact(usd: usageUSD))
         }
     }
 }

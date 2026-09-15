@@ -25,7 +25,7 @@ final class ComposeModel {
         guard !prompt.isEmpty else { return }
         status = .sending
         guard let outcome = await environment.deliver(.prompt(threadID: threadID, text: prompt, steer: true)) else {
-            status = .failed("No bridge configured")
+            status = .failed(WatchStrings.text("No bridge configured"))
             return
         }
         switch outcome {
@@ -60,6 +60,9 @@ struct ComposeView: View {
                 TextField("Prompt", text: $model.text, axis: .vertical)
                     .font(AmpTheme.body(14))
                     .accessibilityIdentifier("prompt-field")
+
+                DictationButton(text: $model.text)
+                    .disabled(model.status == .sending)
 
                 PhraseChips(phrases: phrases) { model.text = $0 }
 
@@ -102,8 +105,8 @@ struct ComposeView: View {
                 .accessibilityIdentifier("send-confirmation")
         case let .queued(behind):
             Text(behind == 0
-                 ? "saved — sends when the watch is back online"
-                 : "saved — \(behind) ahead of it in the queue")
+                 ? WatchStrings.text("saved — sends when the watch is back online")
+                 : WatchStrings.format("saved — %d ahead of it in the queue", behind))
                 .font(AmpTheme.body(11))
                 .foregroundStyle(AmpTheme.parchment)
                 .accessibilityIdentifier("send-queued")

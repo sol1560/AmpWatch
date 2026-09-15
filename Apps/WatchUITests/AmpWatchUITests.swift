@@ -11,11 +11,27 @@ final class AmpWatchUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    private func launch(screen: String) -> XCUIApplication {
+    private func launch(screen: String, language: String = "en") -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-ampwatch-screen", screen]
+        // Keep semantic assertions stable regardless of the simulator host's
+        // language. Chinese rendering is exercised by the screenshot harness.
+        app.launchArguments = [
+            "-AppleLanguages", "(\(language))",
+            "-AppleLocale", language == "zh-Hans" ? "zh_CN" : "en_US",
+            "-ampwatch-screen", screen,
+        ]
         app.launch()
         return app
+    }
+
+    func testChineseReplyAndEnglishFallback() {
+        let chinese = launch(screen: "compose", language: "zh-Hans")
+        XCTAssertTrue(chinese.buttons["dictation-button"].waitForExistence(timeout: 20))
+        XCTAssertEqual(chinese.buttons["dictation-button"].label, "语音输入")
+        chinese.terminate()
+        let fallback = launch(screen: "compose", language: "fr")
+        XCTAssertTrue(fallback.buttons["dictation-button"].waitForExistence(timeout: 20))
+        XCTAssertEqual(fallback.buttons["dictation-button"].label, "Voice input")
     }
 
     func testThreadListShowsFirstAndLastFixtureThread() {

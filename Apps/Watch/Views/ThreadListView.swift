@@ -55,13 +55,13 @@ struct ThreadListView: View {
         Group {
             switch model.state {
             case .loading:
-                LoadingView(label: "Threads")
+                LoadingView(label: WatchStrings.text("Threads"))
             case let .failed(error):
                 ErrorView(error: error) { await model.load(from: amp) }
             case let .loaded(threads) where threads.isEmpty:
                 EmptyStateView(
-                    headline: "Nothing moving",
-                    detail: "Start a thread on the web or in the CLI."
+                    headline: WatchStrings.text("Nothing moving"),
+                    detail: WatchStrings.text("Start a thread on the web or in the CLI.")
                 )
             case let .loaded(threads):
                 list(threads)
@@ -131,7 +131,7 @@ struct OutboxBanner: View {
         VStack(alignment: .leading, spacing: 2) {
             if status.pending > 0 {
                 Label(
-                    status.pending == 1 ? "1 waiting to send" : "\(status.pending) waiting to send",
+                    WatchStrings.format(status.pending == 1 ? "%d waiting to send" : "%d waiting to send.plural", status.pending),
                     systemImage: "tray.and.arrow.up"
                 )
                 .foregroundStyle(AmpTheme.accent(dimmed: dimmed))

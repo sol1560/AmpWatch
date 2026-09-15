@@ -53,10 +53,10 @@ extension ThreadActivity {
     /// change, not a run state reported by the agent.
     var label: String {
         switch self {
-        case .live: "moving"
-        case .recent: "just quiet"
-        case .dormant: "quiet"
-        case .unknown: "unknown"
+        case .live: WatchStrings.text("moving")
+        case .recent: WatchStrings.text("just quiet")
+        case .dormant: WatchStrings.text("quiet")
+        case .unknown: WatchStrings.text("unknown")
         }
     }
 }

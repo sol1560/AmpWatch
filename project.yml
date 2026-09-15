@@ -9,6 +9,7 @@ name: AmpWatch
 
 options:
   bundleIdPrefix: com.soll.ampwatch
+  developmentLanguage: en
   createIntermediateGroups: true
   deploymentTarget:
     watchOS: "11.0"

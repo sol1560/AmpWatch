@@ -17,6 +17,7 @@ bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${app_path}/
 screens=(threads threads-empty threads-error threads-queued threads-over-cap detail detail-over-cap compose usage setup settings new-thread approval approval-destructive approval-deferred approval-expired phrases templates glance glance-spend)
 
 mkdir -p "$out_dir"
+mkdir -p "${out_dir}/zh-Hans"
 
 xcrun simctl bootstatus "$udid" -b
 xcrun simctl install "$udid" "$app_path"
@@ -24,6 +25,7 @@ xcrun simctl install "$udid" "$app_path"
 for screen in "${screens[@]}"; do
   xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
   xcrun simctl launch --console-pty "$udid" "$bundle_id" \
+    -AppleLanguages '(en)' -AppleLocale en_US \
     -ampwatch-screen "$screen" >/dev/null 2>&1 &
   launch_pid=$!
 
@@ -32,6 +34,16 @@ for screen in "${screens[@]}"; do
   xcrun simctl io "$udid" screenshot --type=png "${out_dir}/${screen}.png"
   kill "$launch_pid" >/dev/null 2>&1 || true
   echo "captured ${screen}"
+
+  xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
+  xcrun simctl launch --console-pty "$udid" "$bundle_id" \
+    -AppleLanguages '(zh-Hans)' -AppleLocale zh_CN \
+    -ampwatch-screen "$screen" >/dev/null 2>&1 &
+  launch_pid=$!
+  sleep 4
+  xcrun simctl io "$udid" screenshot --type=png "${out_dir}/zh-Hans/${screen}.png"
+  kill "$launch_pid" >/dev/null 2>&1 || true
+  echo "captured zh-Hans/${screen}"
 done
 
 xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true

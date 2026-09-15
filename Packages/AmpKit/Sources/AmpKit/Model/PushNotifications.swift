@@ -29,10 +29,10 @@ public enum PushAction: String, CaseIterable, Sendable {
 
     public var title: String {
         switch self {
-        case .continueThread: "Continue"
-        case .retry: "Try again"
-        case .approve: "Approve"
-        case .reject: "Reject"
+        case .continueThread: AmpStrings.text("push.continue")
+        case .retry: AmpStrings.text("push.retry")
+        case .approve: AmpStrings.text("push.approve")
+        case .reject: AmpStrings.text("push.reject")
         }
     }
 

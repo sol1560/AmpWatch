@@ -23,7 +23,7 @@ struct GlanceGalleryView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 10) {
-                section(kind == .awaiting ? "Waiting on you" : "Spend today", kind: kind)
+                section(WatchStrings.text(kind == .awaiting ? "Waiting on you" : "Spend today"), kind: kind)
                 AmpRule()
                 Text("Stale")
                     .font(AmpTheme.body(11, weight: .medium))

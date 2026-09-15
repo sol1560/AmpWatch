@@ -36,7 +36,8 @@ public enum AmpSession: Sendable {
         guard let raw = nonEmpty(try? secrets.read(.webhookURL)),
               let url = URL(string: raw),
               url.scheme?.lowercased() == "https",
-              url.host != nil
+              let host = url.host,
+              !host.isEmpty
         else { return nil }
         return url
     }

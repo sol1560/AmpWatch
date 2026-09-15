@@ -13,7 +13,7 @@ final class ApprovalModel {
     func send(_ decision: ApprovalDecision, for approval: PendingApproval, using environment: AmpEnvironment) async {
         status = .sending
         guard let outcome = await environment.deliver(approval.decision(decision)) else {
-            status = .failed("No bridge configured")
+            status = .failed(WatchStrings.text("No bridge configured"))
             return
         }
         switch outcome {
@@ -76,8 +76,8 @@ struct ApprovalView: View {
                 .accessibilityIdentifier("approval-tool")
             Spacer()
             Text(approval.isExpired(now: amp.now())
-                 ? "expired"
-                 : "waiting \(RelativeTime.short(from: approval.requestedAt, to: amp.now()))")
+                 ? WatchStrings.text("expired")
+                 : WatchStrings.format("waiting %@", RelativeTime.short(from: approval.requestedAt, to: amp.now())))
                 .font(AmpTheme.body(12))
                 .foregroundStyle(AmpTheme.parchmentDim)
         }
@@ -92,7 +92,7 @@ struct ApprovalView: View {
             .background(AmpTheme.surface, in: RoundedRectangle(cornerRadius: 8))
             // The command can name files and hosts; not for the always-on face.
             .privacySensitive()
-            .accessibilityLabel("Command: \(approval.input)")
+            .accessibilityLabel(WatchStrings.format("Command: %@", approval.input))
             .accessibilityIdentifier("approval-command")
     }
 
@@ -109,7 +109,7 @@ struct ApprovalView: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Warning: " + signals.map(\.label).joined(separator: ", "))
+        .accessibilityLabel(WatchStrings.format("Warning: %@", signals.map(\.label).joined(separator: ", ")))
         .accessibilityIdentifier("approval-warning")
     }
 
@@ -179,7 +179,7 @@ struct ApprovalView: View {
         // The bridge rejects a held call after `PendingApproval.decisionWindow`
         // (`APPROVAL_TIMEOUT_MS` in the plugin). A decision sent now would
         // either be dropped or, worse, land on a later call.
-        Text("The agent stopped waiting after \(Int(PendingApproval.decisionWindow / 60)) min and rejected it. Nothing to decide.")
+        Text(WatchStrings.format("The agent stopped waiting after %d min and rejected it. Nothing to decide.", Int(PendingApproval.decisionWindow / 60)))
             .font(AmpTheme.body(12))
             .foregroundStyle(AmpTheme.parchmentDim)
             .accessibilityIdentifier("approval-expired")
@@ -203,7 +203,7 @@ struct ApprovalView: View {
             // A decision that sits too long is dropped, not delivered late
             // (`Outbox.decisionTTL`); say so, because "saved" alone would
             // read as "done".
-            Text("saved — sends when back online, or is dropped after \(Int(Outbox.decisionTTL / 60)) min")
+            Text(WatchStrings.format("saved — sends when back online, or is dropped after %d min", Int(Outbox.decisionTTL / 60)))
                 .font(AmpTheme.body(11))
                 .foregroundStyle(AmpTheme.parchment)
                 .accessibilityIdentifier("approval-status")
@@ -219,9 +219,9 @@ struct ApprovalView: View {
     /// with it, so the copy says what was sent, not what happened.
     private func sentLabel(_ decision: ApprovalDecision) -> String {
         switch decision {
-        case .approve: "approval sent"
-        case .reject: "rejection sent"
-        case .defer_: "left waiting"
+        case .approve: WatchStrings.text("approval sent")
+        case .reject: WatchStrings.text("rejection sent")
+        case .defer_: WatchStrings.text("left waiting")
         }
     }
 }

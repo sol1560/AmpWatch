@@ -44,13 +44,13 @@ extension AmpError {
     /// Short enough for a 40mm screen.
     public var watchDescription: String {
         switch self {
-        case .unauthorized: "Sign in again"
-        case .forbidden: "Missing scope"
-        case .notFound: "Not found"
-        case .rateLimited: "Rate limited"
-        case let .server(status, _): "Server error \(status)"
-        case .transport: "No connection"
-        case .decoding: "Unexpected reply"
+        case .unauthorized: AmpStrings.text("error.sign_in_again")
+        case .forbidden: AmpStrings.text("error.missing_scope")
+        case .notFound: AmpStrings.text("error.not_found")
+        case .rateLimited: AmpStrings.text("error.rate_limited")
+        case let .server(status, _): AmpStrings.format("error.server", status)
+        case .transport: AmpStrings.text("error.no_connection")
+        case .decoding: AmpStrings.text("error.unexpected_reply")
         }
     }
 }
