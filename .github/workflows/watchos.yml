@@ -1,0 +1,80 @@
+# Builds the watch app, runs its tests on a watchOS simulator, and uploads a
+# screenshot of every screen.
+#
+# Runs on GitHub's standard macOS runner, which is free for public
+# repositories. The runner image ships watchOS simulator runtimes, so no
+# developer account, no code signing and no Mac of our own is involved: an
+# agent can open a PR and read the rendered result from the artifact.
+name: watchOS
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: watchos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # Standard (not "larger") runner: free for public repos.
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Report toolchain
+        run: |
+          xcodebuild -version
+          echo "Available watchOS runtimes:"
+          xcrun simctl list runtimes | grep -i watchos || echo "  none"
+
+      # AmpKit is platform-neutral; running its tests on macOS first fails fast
+      # and cheaply before any simulator boots.
+      - name: Test AmpKit
+        working-directory: Packages/AmpKit
+        run: swift test
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Choose a watchOS simulator
+        id: sim
+        run: |
+          chmod +x Scripts/*.sh
+          IFS=$'\t' read -r udid name runtime < <(Scripts/pick-watch-simulator.sh)
+          echo "udid=$udid"       >> "$GITHUB_OUTPUT"
+          echo "name=$name"       >> "$GITHUB_OUTPUT"
+          echo "runtime=$runtime" >> "$GITHUB_OUTPUT"
+          echo "Using $name ($runtime)"
+
+      - name: Build and test on the watch simulator
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project AmpWatch.xcodeproj \
+            -scheme AmpWatch \
+            -destination "platform=watchOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath .build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            | xcbeautify
+
+      - name: Capture a screenshot of every screen
+        run: |
+          app=$(find .build/DerivedData/Build/Products -name 'AmpWatch.app' -maxdepth 3 | head -1)
+          test -n "$app" || { echo "AmpWatch.app not found"; exit 1; }
+          Scripts/capture-screens.sh "${{ steps.sim.outputs.udid }}" "$app" .artifacts/screens
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: watch-screens-${{ steps.sim.outputs.runtime }}
+          path: .artifacts/screens
+          if-no-files-found: error

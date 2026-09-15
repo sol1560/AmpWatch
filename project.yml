@@ -1,0 +1,71 @@
+# XcodeGen project definition.
+#
+# The .xcodeproj is generated, never committed: a pbxproj is unreviewable in a
+# diff and merges badly, and every agent working on this repo needs to be able
+# to add a file without opening Xcode.
+#
+#   brew install xcodegen && xcodegen generate
+name: AmpWatch
+
+options:
+  bundleIdPrefix: com.soll.ampwatch
+  createIntermediateGroups: true
+  deploymentTarget:
+    watchOS: "11.0"
+
+packages:
+  AmpKit:
+    path: Packages/AmpKit
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    CODE_SIGNING_REQUIRED: "NO"
+    CODE_SIGN_IDENTITY: ""
+    CODE_SIGNING_ALLOWED: "NO"
+
+targets:
+  AmpWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - path: Apps/Watch
+    dependencies:
+      - package: AmpKit
+        product: AmpKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.soll.ampwatch.watchkitapp
+        PRODUCT_NAME: AmpWatch
+        TARGETED_DEVICE_FAMILY: "4"
+        GENERATE_INFOPLIST_FILE: "YES"
+        INFOPLIST_KEY_CFBundleDisplayName: Amp
+        INFOPLIST_KEY_WKApplication: "YES"
+        INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp: "YES"
+        ENABLE_PREVIEWS: "YES"
+
+  AmpWatchUITests:
+    type: bundle.ui-testing
+    platform: watchOS
+    sources:
+      - path: Apps/WatchUITests
+    dependencies:
+      - target: AmpWatch
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.soll.ampwatch.uitests
+        TEST_TARGET_NAME: AmpWatch
+
+schemes:
+  AmpWatch:
+    build:
+      targets:
+        AmpWatch: all
+        AmpWatchUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - AmpWatchUITests
