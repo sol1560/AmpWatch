@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+swiftly_env="$HOME/.local/share/swiftly/env.sh"
+if [[ ! -f "$swiftly_env" ]]; then
+	echo "Swift environment is missing; rerun .agents/setup." >&2
+	exit 1
+fi
+
+# shellcheck disable=SC1090
+source "$swiftly_env"
+command -v swift >/dev/null
+command -v bun >/dev/null

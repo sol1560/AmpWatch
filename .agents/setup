@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+started_at=$SECONDS
+swift_version=6.0.3
+swiftly_home="$HOME/.local/share/swiftly"
+swiftly_bin="$HOME/.local/bin"
+
+step() {
+	printf '[orb setup +%ss] %s\n' "$((SECONDS - started_at))" "$1"
+}
+
+if [[ "$(uname -s)" != Linux || "$(uname -m)" != x86_64 ]]; then
+	echo "AmpWatch orb setup supports Debian x86_64 only." >&2
+	exit 1
+fi
+
+mkdir -p "$swiftly_home" "$swiftly_bin"
+export SWIFTLY_HOME_DIR="$swiftly_home"
+export SWIFTLY_BIN_DIR="$swiftly_bin"
+
+if [[ ! -x "$swiftly_bin/swiftly" ]]; then
+	step "installing swiftly"
+	tmp_dir=$(mktemp -d)
+	trap 'rm -rf "$tmp_dir"' EXIT
+	curl --fail --location --silent --show-error \
+		"https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz" \
+		--output "$tmp_dir/swiftly.tar.gz"
+	tar -xzf "$tmp_dir/swiftly.tar.gz" -C "$tmp_dir"
+	"$tmp_dir/swiftly" init --assume-yes --skip-install
+fi
+
+# swiftly writes every path needed by Swift into this file. Source it in this
+# process, and ensure future non-interactive login shells do the same.
+# shellcheck disable=SC1090
+source "$swiftly_home/env.sh"
+if ! grep -Fq "$swiftly_home/env.sh" "$HOME/.bash_profile" 2>/dev/null; then
+	cat >> "$HOME/.bash_profile" <<EOF
+
+# Added by AmpWatch orb setup
+if [[ -f "$swiftly_home/env.sh" ]]; then
+	. "$swiftly_home/env.sh"
+fi
+EOF
+fi
+
+if ! swift --version 2>/dev/null | grep -Fq "Swift version $swift_version"; then
+	step "installing Swift $swift_version"
+	post_install=$(mktemp)
+	"$swiftly_bin/swiftly" install "$swift_version" --use --assume-yes --post-install-file="$post_install"
+	if [[ -s "$post_install" ]]; then
+		sudo bash "$post_install"
+	fi
+	rm -f "$post_install"
+fi
+
+step "installing plugin dependencies"
+bun install --cwd Plugin --frozen-lockfile
+
+step "resolving AmpKit dependencies"
+swift package --package-path Packages/AmpKit resolve
+
+step "ready (Swift $swift_version, Bun $(bun --version))"
