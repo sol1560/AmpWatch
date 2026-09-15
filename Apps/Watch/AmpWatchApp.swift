@@ -118,7 +118,11 @@ enum ScreenshotScene: String, CaseIterable {
 }
 
 #Preview("Threads") {
-    RootView().environment(\.amp, .fixture())
+    NavigationStack { ThreadListView() }.environment(\.amp, .fixture())
+}
+
+#Preview("Setup") {
+    RootView(secrets: InMemorySecretStore())
 }
 
 #Preview("Usage") {
