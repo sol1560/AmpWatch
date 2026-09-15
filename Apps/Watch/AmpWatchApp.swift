@@ -53,7 +53,7 @@ struct RootView: View {
     }
 
     private func registerForPushes() async {
-        guard let token = push?.deviceToken, case let .ready(_, sink) = session else { return }
+        guard let token = push?.deviceToken, case let .ready(_, sink?) = session else { return }
         try? secrets.write(token, for: .deviceToken)
         // Best effort: the bridge only learns the token this way, and the next
         // launch tries again. Nothing to show the user if it fails.
@@ -61,7 +61,7 @@ struct RootView: View {
     }
 
     private func sendPendingCommand() async {
-        guard let push, let command = push.pendingCommand, case let .ready(_, sink) = session else { return }
+        guard let push, let command = push.pendingCommand, case let .ready(_, sink?) = session else { return }
         push.pendingCommand = nil
         try? await sink.send(command, idempotencyKey: nil)
     }

@@ -11,7 +11,7 @@ import AmpKit
 /// keeps the delegate free of credentials and keeps the send path in one place.
 @MainActor
 @Observable
-final class PushRegistrar: NSObject, @preconcurrency WKApplicationDelegate, UNUserNotificationCenterDelegate {
+final class PushRegistrar: NSObject, WKApplicationDelegate, UNUserNotificationCenterDelegate {
     /// Lower-case hex token from the last successful registration this launch.
     private(set) var deviceToken: String?
     /// Why registration did not happen, for the settings screen.
@@ -54,7 +54,7 @@ final class PushRegistrar: NSObject, @preconcurrency WKApplicationDelegate, UNUs
         registrationProblem = nil
     }
 
-    func didFailToRegisterForRemoteNotifications(withError error: any Error) {
+    func didFailToRegisterForRemoteNotificationsWithError(_ error: any Error) {
         registrationProblem = error.localizedDescription
     }
 
