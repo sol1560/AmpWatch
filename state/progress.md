@@ -7,7 +7,7 @@
 | M2 hub plugin + writes | done | run 34938964112 green; toolbar glyph fix, Stop under header, picker as navigationLink pending CI |
 | M3 pushes | done | run 34940416257 green; detail (Stop under header) and new-thread (Mode picker row) inspected |
 | M4 approvals | done | run 34942528647 green; approval / approval-destructive / approval-deferred inspected; bridge round trip (approve, reject, timeout) verified in this orb |
-| M5 offline | pending | |
+| M5 offline | in progress | AmpKit 85 green; run 34944265965 pending |
 | M6 polish | pending | |
 
 ## Log
@@ -21,3 +21,4 @@
   forwarded to `approve-<threadID>` webhook; `echo … curl …` held; watcher script POSTed
   `decide approve` → ran; `decide reject` → tool rejected; no decision → rejected after 4 min.
 - 2026-09-15 M4 done (run 34942528647). Amp's own tool.call ceiling still being probed by thread B.
+- 2026-09-15 Thread B: tool.call handler held 2/5/10/20 min, all fine; no ceiling. Timeout raised to 10 min both sides. M5 pushed (c241b49).

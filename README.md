@@ -17,11 +17,18 @@ milestone 2 — see [Roadmap](#roadmap).
 
 | Screen | Shows |
 | --- | --- |
-| Threads | One row per thread: activity dot, title, repo, time since last change |
-| Thread | The transcript, trimmed to what fits a wrist |
-| Reply | Dictate or scribble a prompt into a running thread |
+| Threads | One row per thread: activity dot, title, repo, time since last change; live threads also show spend, flagged past your cap. Anything still waiting to send sits at the top |
+| Thread | The transcript, trimmed to what fits a wrist; Stop, Reply, Cost, and "Ask me first" |
+| Reply | Dictate or scribble a prompt into a running thread, or tap a saved phrase |
+| New thread | Start a thread from a template or a dictated prompt |
 | Cost | Thread spend, broken down per model |
 | Approve? | A held shell command, with a warning for anything destructive; Approve is missing when the command cannot be shown whole |
+| Phrases, Templates | Edit the phrases and templates above, on the watch |
+
+Every send goes through an on-disk outbox first. With no link, the screen
+says "saved" instead of failing, and the next raise of the wrist retries in
+order. A queued approval older than the bridge's own timeout (10 minutes) is
+dropped rather than delivered late.
 
 ## How it talks to Amp
 
@@ -114,7 +121,7 @@ lit in a dark room and costs battery in always-on mode.
 2. ~~Live `AmpAPIClient` + `WebhookPromptSink` wiring, credentials in the Keychain~~
 3. ~~Push notifications from the plugin (`docs/PUSH.md`)~~
 4. ~~Approvals: arm a thread from the watch, decide held shell commands~~
-5. Offline outbox, saved phrases, thread templates, a spend cap
+5. ~~Offline outbox, saved phrases, thread templates, a spend cap~~
 6. Complication and background refresh, so the wrist shows thread activity
    without opening the app
 

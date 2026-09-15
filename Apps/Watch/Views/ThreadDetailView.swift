@@ -295,6 +295,7 @@ struct BudgetBadge: View {
         }
         .font(AmpTheme.body(12, weight: standing == .fine ? .regular : .medium))
         .foregroundStyle(standing == .fine ? AmpTheme.parchmentDim : AmpTheme.ember)
+        .lineLimit(1)
         .accessibilityIdentifier(standing == .fine ? "cost-amount" : "budget-warning")
     }
 

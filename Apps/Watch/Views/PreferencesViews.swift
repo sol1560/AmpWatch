@@ -94,7 +94,6 @@ struct TemplatesView: View {
                 .accessibilityIdentifier("template-save-button")
             }
             .font(AmpTheme.body(13))
-            .listRowBackground(Color.clear)
 
             Section {
                 ForEach(preferences.templates) { template in

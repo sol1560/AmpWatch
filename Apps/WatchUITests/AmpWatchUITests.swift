@@ -69,7 +69,11 @@ final class AmpWatchUITests: XCTestCase {
 
     func testSettingsMasksSecrets() {
         let app = launch(screen: "settings")
-        XCTAssertTrue(app.descendants(matching: .any)["settings"].waitForExistence(timeout: 20))
+        let settings = app.descendants(matching: .any)["settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 20))
+        // The credentials sit below the wrist preferences; `List` only
+        // materialises rows once they scroll into view.
+        settings.swipeUp()
         // The fixture token ends in "7f3a"; a screenshot of this screen ends up
         // in a public CI artifact, so only that suffix may be on screen.
         let token = app.staticTexts["token-value"]
@@ -209,6 +213,8 @@ final class AmpWatchUITests: XCTestCase {
         let app = launch(screen: "templates")
         XCTAssertTrue(app.descendants(matching: .any)["templates"].waitForExistence(timeout: 20))
         XCTAssertFalse(app.buttons["template-save-button"].isEnabled)
+        // The saved templates sit below the form.
+        app.descendants(matching: .any)["templates"].swipeUp()
         let rows = app.descendants(matching: .any).matching(identifier: "template-row")
         XCTAssertTrue(rows.element(boundBy: 0).waitForExistence(timeout: 5))
         XCTAssertTrue(rows.element(boundBy: 0).label.contains("Fix CI"))

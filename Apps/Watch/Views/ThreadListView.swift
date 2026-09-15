@@ -144,6 +144,7 @@ struct ThreadRow: View {
     var budgetCapUSD: Double?
 
     private var activity: ThreadActivity { thread.activity(now: now) }
+    private var standing: BudgetStanding { BudgetStanding(usageUSD: usageUSD ?? 0, capUSD: budgetCapUSD) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -165,13 +166,19 @@ struct ThreadRow: View {
                     Text("·")
                 }
                 Text(RelativeTime.short(from: thread.updatedAt, to: now))
-                if let usageUSD {
+                if let usageUSD, standing == .fine {
                     Spacer(minLength: 4)
-                    BudgetBadge(usageUSD: usageUSD, standing: BudgetStanding(usageUSD: usageUSD, capUSD: budgetCapUSD))
+                    BudgetBadge(usageUSD: usageUSD, standing: standing)
                 }
             }
             .font(AmpTheme.body(12))
             .foregroundStyle(AmpTheme.parchmentDim)
+
+            // A flag needs its own line; squeezed next to the repo name it
+            // wraps into three and pushes the name off the row.
+            if let usageUSD, standing != .fine {
+                BudgetBadge(usageUSD: usageUSD, standing: standing)
+            }
         }
         .padding(.vertical, 6)
         .accessibilityElement(children: .combine)
