@@ -84,9 +84,12 @@ final class AmpWatchUITests: XCTestCase {
         // in a public CI artifact, so only that suffix may be on screen.
         XCTAssertTrue(token.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertEqual(token.label, "…7f3a")
+        // Further crown turns did nothing once the token row was on screen
+        // (run 34950202185), but a swipe lands on the last screenful, and the
+        // bridge row is the first thing there (run 34948838337).
         let webhook = app.descendants(matching: .any)["webhook-value"]
-        for _ in 0..<10 where !webhook.exists {
-            XCUIDevice.shared.rotateDigitalCrown(delta: 0.08)
+        for _ in 0..<3 where !webhook.exists {
+            settings.swipeUp()
         }
         XCTAssertTrue(webhook.waitForExistence(timeout: 5), app.debugDescription)
         XCTAssertEqual(webhook.label, "hooks.example.test")
