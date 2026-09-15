@@ -68,6 +68,7 @@ struct ThreadDetailView: View {
     let thread: ThreadSummary
 
     @Environment(\.amp) private var amp
+    @Environment(\.isLuminanceReduced) private var dimmed
     @State private var model = ThreadDetailModel()
     @State private var budgetCap: Double?
 
@@ -120,7 +121,7 @@ struct ThreadDetailView: View {
                 } label: {
                     Label("Reply", systemImage: "mic.fill")
                 }
-                .tint(AmpTheme.ember)
+                .ampAccent()
                 .accessibilityIdentifier("reply-button")
 
                 costRow
@@ -148,7 +149,7 @@ struct ThreadDetailView: View {
                 }
             }
         }
-        .tint(standing == .fine ? AmpTheme.parchmentDim : AmpTheme.ember)
+        .tint(standing == .fine ? AmpTheme.parchmentDim : AmpTheme.accent(dimmed: dimmed))
         .accessibilityIdentifier("cost-row")
     }
 
@@ -161,14 +162,14 @@ struct ThreadDetailView: View {
             } label: {
                 Label("Stop", systemImage: "stop.fill")
             }
-            .tint(AmpTheme.ember)
+            .ampAccent()
             .accessibilityIdentifier("cancel-button")
         case .confirming:
             HStack {
                 Button("Stop turn", role: .destructive) {
                     Task { await model.cancel(threadID: thread.id, using: amp) }
                 }
-                .tint(AmpTheme.ember)
+                .ampAccent()
                 .accessibilityIdentifier("cancel-confirm-button")
                 Button("Keep") { model.cancelStatus = .idle }
                     .tint(AmpTheme.parchmentDim)
@@ -243,12 +244,13 @@ struct ThreadDetailView: View {
 struct MessageView: View {
     let message: ThreadMessage
     let now: Date
+    @Environment(\.isLuminanceReduced) private var dimmed
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 4) {
                 Text(speaker)
-                    .foregroundStyle(message.role == .user ? AmpTheme.ember : AmpTheme.parchmentDim)
+                    .foregroundStyle(message.role == .user ? AmpTheme.accent(dimmed: dimmed) : AmpTheme.parchmentDim)
                 Spacer()
                 Text(RelativeTime.short(from: message.createdAt, to: now))
                     .foregroundStyle(AmpTheme.parchmentDim)
@@ -256,9 +258,12 @@ struct MessageView: View {
             .font(AmpTheme.body(11, weight: .medium))
 
             if let text = message.text {
+                // Redacted on the always-on face: a wrist resting on a desk
+                // should not show the room what the agent just said.
                 Text(text)
                     .font(AmpTheme.body(14))
                     .foregroundStyle(AmpTheme.parchment)
+                    .privacySensitive()
             } else {
                 // Tool calls and other non-text blocks: say so instead of
                 // rendering an empty row the user cannot interpret.
@@ -268,6 +273,8 @@ struct MessageView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(speaker), \(RelativeTime.short(from: message.createdAt, to: now)) ago: \(message.text ?? "tool activity")")
         .accessibilityIdentifier("message")
     }
 
@@ -285,6 +292,7 @@ struct MessageView: View {
 struct BudgetBadge: View {
     let usageUSD: Double
     let standing: BudgetStanding
+    @Environment(\.isLuminanceReduced) private var dimmed
 
     var body: some View {
         HStack(spacing: 3) {
@@ -294,9 +302,20 @@ struct BudgetBadge: View {
             Text(text)
         }
         .font(AmpTheme.body(12, weight: standing == .fine ? .regular : .medium))
-        .foregroundStyle(standing == .fine ? AmpTheme.parchmentDim : AmpTheme.ember)
+        .foregroundStyle(standing == .fine ? AmpTheme.parchmentDim : AmpTheme.accent(dimmed: dimmed))
         .lineLimit(1)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spoken)
         .accessibilityIdentifier(standing == .fine ? "cost-amount" : "budget-warning")
+    }
+
+    private var spoken: String {
+        let amount = Money.compact(usd: usageUSD)
+        switch standing {
+        case .fine: return "spent \(amount)"
+        case .near: return "spent \(amount), near cap"
+        case .over: return "spent \(amount), over cap"
+        }
     }
 
     private var text: String {

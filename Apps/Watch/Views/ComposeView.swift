@@ -70,7 +70,7 @@ struct ComposeView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(AmpTheme.ember)
+                .ampAccent()
                 .disabled(!model.canSend)
                 .accessibilityIdentifier("send-button")
 
@@ -136,6 +136,7 @@ struct PhraseChips: View {
                 }
                 .buttonStyle(.bordered)
                 .tint(AmpTheme.parchmentDim)
+                .accessibilityHint("Puts this in the reply field; Send is still up to you")
                 .accessibilityIdentifier("phrase-chip")
             }
         }

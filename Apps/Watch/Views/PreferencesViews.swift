@@ -89,7 +89,7 @@ struct TemplatesView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(AmpTheme.ember)
+                .ampAccent()
                 .disabled(!canSave)
                 .accessibilityIdentifier("template-save-button")
             }

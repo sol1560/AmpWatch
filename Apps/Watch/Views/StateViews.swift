@@ -7,7 +7,7 @@ struct LoadingView: View {
     var body: some View {
         VStack(spacing: 8) {
             ProgressView()
-                .tint(AmpTheme.ember)
+                .ampAccent()
             Text(label)
                 .font(AmpTheme.body(12))
                 .foregroundStyle(AmpTheme.parchmentDim)
@@ -54,7 +54,7 @@ struct ErrorView: View {
                 Task { await retry() }
             }
             .buttonStyle(.bordered)
-            .tint(AmpTheme.ember)
+            .ampAccent()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .accessibilityIdentifier("error-state")

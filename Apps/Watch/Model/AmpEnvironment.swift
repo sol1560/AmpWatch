@@ -20,6 +20,9 @@ struct AmpEnvironment: Sendable {
     var dispatcher: Dispatcher?
     var outbox: OutboxStatus
     var preferences: PreferencesStore
+    /// Where the thread list publishes what the complications show. `nil`
+    /// for fixtures, so a screenshot run never writes to the app group.
+    var glance: GlancePublisher?
     var secrets: any SecretStore
     var now: @Sendable () -> Date
     var reload: @MainActor () -> Void

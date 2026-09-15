@@ -117,6 +117,7 @@ struct RootView: View {
             dispatcher: dispatcher,
             outbox: outboxStatus,
             preferences: PreferencesStore(),
+            glance: .shared,
             secrets: secrets,
             now: { Date() },
             reload: {
@@ -154,6 +155,7 @@ enum ScreenshotScene: String, CaseIterable {
     case detailOverCap = "detail-over-cap"
     case phrases
     case templates
+    case glance
 
     static let launchArgument = "-ampwatch-screen"
 
@@ -215,6 +217,8 @@ enum ScreenshotScene: String, CaseIterable {
             NavigationStack { PhrasesView() }.tint(AmpTheme.ember)
         case .templates:
             NavigationStack { TemplatesView() }.tint(AmpTheme.ember)
+        case .glance:
+            NavigationStack { GlanceGalleryView() }.tint(AmpTheme.ember)
         }
     }
 }

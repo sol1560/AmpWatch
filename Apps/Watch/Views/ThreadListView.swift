@@ -5,19 +5,29 @@ import AmpKit
 @Observable
 final class ThreadListModel {
     private(set) var state: Loadable<[ThreadSummary]> = .loading
-    /// Spend for the threads that can still be spending. Only live threads are
-    /// looked up: a quiet thread's cost cannot grow, and each lookup is one
-    /// request against a budget shared with everything else the watch does.
+    /// Spend for the threads that matter today: the live ones, whose cost is
+    /// still growing, and anything else that changed since midnight, which is
+    /// what the spend complication adds up. A thread quiet since yesterday
+    /// is not looked up; each lookup is one request against a budget shared
+    /// with everything else the watch does.
     private(set) var usage: [String: ThreadUsage] = [:]
 
     func load(from environment: AmpEnvironment) async {
         do {
             let page = try await environment.client.threads(limit: 25)
             state = .loaded(page.items)
-            await loadUsage(for: page.items.filter { $0.activity(now: environment.now()) == .live }, from: environment)
+            let now = environment.now()
+            await loadUsage(for: page.items.filter { Self.isWorthPricing($0, now: now) }, from: environment)
+            await environment.glance?.publish(threads: page.items, usage: usage, now: now)
         } catch {
             state = .failed(error as? AmpError ?? .transport(String(describing: error)))
         }
+    }
+
+    static func isWorthPricing(_ thread: ThreadSummary, now: Date) -> Bool {
+        if thread.activity(now: now) == .live { return true }
+        guard let updatedAt = thread.updatedAt else { return false }
+        return Calendar.current.isDate(updatedAt, inSameDayAs: now)
     }
 
     private func loadUsage(for threads: [ThreadSummary], from environment: AmpEnvironment) async {
@@ -115,6 +125,7 @@ struct ThreadListView: View {
 /// because "did my message send?" is the first thing a raised wrist asks.
 struct OutboxBanner: View {
     let status: OutboxStatus
+    @Environment(\.isLuminanceReduced) private var dimmed
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -123,7 +134,7 @@ struct OutboxBanner: View {
                     status.pending == 1 ? "1 waiting to send" : "\(status.pending) waiting to send",
                     systemImage: "tray.and.arrow.up"
                 )
-                .foregroundStyle(AmpTheme.ember)
+                .foregroundStyle(AmpTheme.accent(dimmed: dimmed))
             }
             if let note = status.note {
                 Text(note)

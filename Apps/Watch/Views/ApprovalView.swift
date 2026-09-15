@@ -85,6 +85,9 @@ struct ApprovalView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(8)
             .background(AmpTheme.surface, in: RoundedRectangle(cornerRadius: 8))
+            // The command can name files and hosts; not for the always-on face.
+            .privacySensitive()
+            .accessibilityLabel("Command: \(approval.input)")
             .accessibilityIdentifier("approval-command")
     }
 
@@ -100,6 +103,8 @@ struct ApprovalView: View {
                 .foregroundStyle(AmpTheme.ember)
             }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Warning: " + signals.map(\.label).joined(separator: ", "))
         .accessibilityIdentifier("approval-warning")
     }
 

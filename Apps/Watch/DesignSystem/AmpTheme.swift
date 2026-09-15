@@ -21,6 +21,16 @@ enum AmpTheme {
     static let ember = Color(red: 0.957, green: 0.482, blue: 0.208)     // #F47B35
     static let rule = Color.white.opacity(0.12)
 
+    /// The accent for anything that is not a blocked thread.
+    ///
+    /// In always-on mode (`isLuminanceReduced`) the face is dimmed and lit for
+    /// hours; a saturated fill there is the brightest thing in the room and
+    /// costs battery for nothing the wearer is looking at. Ember survives only
+    /// on the approval screen, where a thread is actually waiting on a human.
+    static func accent(dimmed: Bool) -> Color {
+        dimmed ? parchment : ember
+    }
+
     static func display(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         .system(size: size, weight: weight, design: .serif)
     }
@@ -31,9 +41,9 @@ enum AmpTheme {
 }
 
 extension ThreadActivity {
-    var tint: Color {
+    func tint(dimmed: Bool = false) -> Color {
         switch self {
-        case .live: AmpTheme.ember
+        case .live: AmpTheme.accent(dimmed: dimmed)
         case .recent: AmpTheme.parchment
         case .dormant, .unknown: AmpTheme.parchmentDim
         }
@@ -64,16 +74,34 @@ struct AmpRule: View {
 /// greyscale always-on rendering and colour-blind vision, not just the tint.
 struct ActivityDot: View {
     let activity: ThreadActivity
+    @Environment(\.isLuminanceReduced) private var dimmed
 
     var body: some View {
         Group {
             if activity == .live {
-                Circle().fill(activity.tint)
+                Circle().fill(activity.tint(dimmed: dimmed))
             } else {
-                Circle().strokeBorder(activity.tint, lineWidth: 1.5)
+                Circle().strokeBorder(activity.tint(dimmed: dimmed), lineWidth: 1.5)
             }
         }
         .frame(width: 7, height: 7)
         .accessibilityLabel(activity.label)
+    }
+}
+
+/// `.tint(AmpTheme.ember)` that steps down to parchment in always-on mode.
+/// For the buttons and links that are prominent by design (Send, Start,
+/// Stop, Reply): they stay findable, they stop glowing.
+struct AmpAccent: ViewModifier {
+    @Environment(\.isLuminanceReduced) private var dimmed
+
+    func body(content: Content) -> some View {
+        content.tint(AmpTheme.accent(dimmed: dimmed))
+    }
+}
+
+extension View {
+    func ampAccent() -> some View {
+        modifier(AmpAccent())
     }
 }

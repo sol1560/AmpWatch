@@ -99,7 +99,7 @@ struct NewThreadView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(AmpTheme.ember)
+                .ampAccent()
                 .disabled(!model.canSend)
                 .accessibilityIdentifier("start-button")
 
